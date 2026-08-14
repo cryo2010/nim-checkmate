@@ -26,19 +26,20 @@ suite "fixture runs":
     let (output, code) = cm("passing")
     check code == 0
     check "PASS" in output
-    check "2 passed, 2 total" in output
+    check "suites: 2/2 passed" in output
 
   test "failing fixture reports checkpoints and exits 1":
     let (output, code) = cm("failing")
     check code == 1
     check "Check failed: a + b == 5" in output
     check "a + b was 4" in output
-    check "1 failed, 1 passed, 2 total" in output
+    check "suites: 1/2 passed (1 failed)" in output
+    check "tests:  2/4 passed (2 failed)" in output
 
   test "filter runs only matching tests":
     let (output, code) = cm("passing", "-t addition")
     check code == 0
-    check "1 passed, 1 total" in output
+    check "tests:  1/1 passed" in output
     check "no matching tests" in output   # the file without matches
 
   test "loop detects flakes":

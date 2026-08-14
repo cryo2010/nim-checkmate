@@ -14,9 +14,9 @@ detection, and line coverage.
     tests/t_math.nim(12, 5): Check failed: a + b == 5
     a + b was 4
 
-Test Suites: 1 failed, 1 flaky, 1 passed, 3 total
-Tests:       2 failed, 1 flaky, 14 passed, 17 total
-Time:        1.31 s
+suites: 1/3 passed (1 failed, 1 flaky)
+tests:  14/17 passed (2 failed, 1 flaky)
+time:   1.31 s
 ```
 
 ## Install

@@ -143,15 +143,22 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
 
 # --- summary --------------------------------------------------------------
 
-proc plural(n: int, word: string): string = $n & " " & word
-
-proc summaryPart(r: Reporter; failed, flaky, passed, skipped, total: int): string =
-  var parts: seq[string]
-  if failed > 0: parts.add r.red($failed & " failed")
-  if flaky > 0: parts.add r.yellow($flaky & " flaky")
-  if skipped > 0: parts.add r.dim($skipped & " skipped")
-  parts.add r.green($passed & " passed")
-  parts.join(", ") & ", " & $total & " total"
+proc ratioLine(r: Reporter; label: string; passed, total: int;
+               failed, flaky, skipped: int): string =
+  ## Hybrid summary: "96/100 passed" spine, non-pass buckets named only
+  ## when nonzero, so a clean run stays compact and "failed" is greppable.
+  var ratio = $passed & "/" & $total & " passed"
+  ratio =
+    if failed > 0: r.red(ratio)
+    elif flaky > 0: r.yellow(ratio)
+    else: r.green(ratio)
+  var buckets: seq[string]
+  if failed > 0: buckets.add r.red($failed & " failed")
+  if flaky > 0: buckets.add r.yellow($flaky & " flaky")
+  if skipped > 0: buckets.add r.dim($skipped & " skipped")
+  result = r.bold(label) & ratio
+  if buckets.len > 0:
+    result.add " (" & buckets.join(", ") & ")"
 
 proc summary*(r: Reporter, s: SuiteSummary) =
   var sFailed, sFlaky, sPassed, sSkipped = 0
@@ -170,10 +177,10 @@ proc summary*(r: Reporter, s: SuiteSummary) =
   echo ""
   if s.bailed:
     echo r.yellow("Bailed on first failure; remaining suites were not run.")
-  echo r.bold("Test Suites: "), r.summaryPart(sFailed, sFlaky, sPassed, sSkipped, s.files.len)
-  echo r.bold("Tests:       "), r.summaryPart(tFailed, tFlaky, tPassed, tSkipped,
-                                              tFailed + tFlaky + tPassed + tSkipped)
-  echo r.bold("Time:        "), fmtSecs(s.wallMs)
+  echo r.ratioLine("suites: ", sPassed, s.files.len, sFailed, sFlaky, sSkipped)
+  echo r.ratioLine("tests:  ", tPassed, tFailed + tFlaky + tPassed + tSkipped,
+                   tFailed, tFlaky, tSkipped)
+  echo r.bold("time:   "), fmtSecs(s.wallMs)
 
 proc finish*(r: Reporter, s: SuiteSummary) =
   ## Failure blocks (discovery order) + summary.
