@@ -102,6 +102,12 @@ suite "aggregation":
     check fileStatus(fo) == fsFlaky
     check fo.passedIters == 2
 
+  test "recorded failure fails the file even if exit code is 0":
+    # user code calling quit(0) must not mask a FAILED test
+    var fo = FileOutcome(compiled: true,
+      runs: @[iterRun(1, 0, @[tr("t", "FAILED")])])
+    check fileStatus(fo) == fsFail
+
   test "file status precedence":
     check fileStatus(FileOutcome(compiled: false)) == fsCompileFail
     check fileStatus(FileOutcome(compiled: false, notRun: true)) == fsNotRun

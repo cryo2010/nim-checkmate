@@ -156,7 +156,14 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool): FileRunOutc
       result.noTests = true
 
 proc iterFailed*(run: IterRun): bool =
-  run.exitCode != 0 or run.timedOut or run.outcome.crashed
+  ## Trust the exit code, but never let it mask recorded failures: user code
+  ## calling quit(0) would otherwise override unittest's setProgramResult(1).
+  if run.exitCode != 0 or run.timedOut or run.outcome.crashed:
+    return true
+  for t in run.outcome.tests:
+    if t.status notin ["OK", "SKIPPED"]:
+      return true
+  false
 
 proc fileStatus*(fo: FileOutcome): FileStatus =
   if fo.notRun: return fsNotRun
