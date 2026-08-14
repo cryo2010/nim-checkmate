@@ -1,0 +1,53 @@
+# Injected into test binaries via `nim c --import:checkmate_inject`.
+#
+# Because --import'ed modules run their top-level code BEFORE the main
+# module's, this registers an OutputFormatter before std/unittest's
+# ensureInitialized() runs; unittest then never installs its default
+# ConsoleOutputFormatter (it only does so when no formatter is registered),
+# so console output is suppressed without any env tricks.
+#
+# If CHECKMATE_EVENTS_FILE is unset, nothing is registered and the binary
+# behaves exactly like a stock std/unittest build.
+#
+# This file must stay self-contained (std imports only): it is embedded in
+# the checkmate binary via staticRead and materialized at runtime. The JSONL
+# protocol here is mirrored by checkmate/events.nim.
+
+import std/[unittest, os, json, monotimes, times]
+
+type CheckmateFormatter = ref object of OutputFormatter
+  f: File
+  testStart: MonoTime
+
+proc emit(cf: CheckmateFormatter, node: JsonNode) =
+  cf.f.writeLine($node)
+  cf.f.flushFile()
+
+method suiteStarted(cf: CheckmateFormatter, suiteName: string) =
+  cf.emit(%*{"e": "suiteStarted", "suite": suiteName})
+
+method testStarted(cf: CheckmateFormatter, testName: string) =
+  cf.testStart = getMonoTime()
+  cf.emit(%*{"e": "testStarted", "test": testName})
+
+method failureOccurred(cf: CheckmateFormatter, checkpoints: seq[string],
+                       stackTrace: string) =
+  cf.emit(%*{"e": "failure", "checkpoints": checkpoints, "stack": stackTrace})
+
+method testEnded(cf: CheckmateFormatter, testResult: TestResult) =
+  let durMs = (getMonoTime() - cf.testStart).inNanoseconds.float / 1e6
+  cf.emit(%*{"e": "testEnded", "suite": testResult.suiteName,
+             "test": testResult.testName, "status": $testResult.status,
+             "durMs": durMs})
+
+method suiteEnded(cf: CheckmateFormatter) =
+  cf.emit(%*{"e": "suiteEnded"})
+
+let checkmateEventsFile = getEnv("CHECKMATE_EVENTS_FILE")
+if checkmateEventsFile.len > 0:
+  try:
+    let cf = CheckmateFormatter(f: open(checkmateEventsFile, fmAppend))
+    cf.emit(%*{"e": "init", "pid": getCurrentProcessId()})
+    addOutputFormatter(cf)
+  except IOError, OSError:
+    discard  # never break the test binary

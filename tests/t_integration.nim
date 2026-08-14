@@ -1,0 +1,120 @@
+## End-to-end tests: shell out to the built checkmate binary against the
+## fixture projects in tests/fixtures/. Requires `nimble build` first.
+## Also keeps the JSONL protocol in sync between the embedded inject module
+## and events.nim (see "events protocol round trip").
+
+import std/[unittest, os, osproc, strutils]
+import checkmate/events
+
+let projectRoot = getCurrentDir()
+let checkmateBin =
+  if getEnv("CHECKMATE_BIN").len > 0: getEnv("CHECKMATE_BIN")
+  else: projectRoot / "checkmate"
+
+doAssert fileExists(checkmateBin),
+  "checkmate binary not found at " & checkmateBin & " (run `nimble build` first)"
+
+proc fixture(name: string): string =
+  projectRoot / "tests" / "fixtures" / name
+
+proc cm(fixtureName: string, args: string = ""): tuple[output: string, exitCode: int] =
+  execCmdEx(quoteShell(checkmateBin) & " --color:never " & args,
+            workingDir = fixture(fixtureName))
+
+suite "fixture runs":
+  test "passing fixture is green":
+    let (output, code) = cm("passing")
+    check code == 0
+    check "PASS" in output
+    check "2 passed, 2 total" in output
+
+  test "failing fixture reports checkpoints and exits 1":
+    let (output, code) = cm("failing")
+    check code == 1
+    check "Check failed: a + b == 5" in output
+    check "a + b was 4" in output
+    check "1 failed, 1 passed, 2 total" in output
+
+  test "filter runs only matching tests":
+    let (output, code) = cm("passing", "-t addition")
+    check code == 0
+    check "1 passed, 1 total" in output
+    check "no matching tests" in output   # the file without matches
+
+  test "loop detects flakes":
+    removeFile(fixture("flaky") / "flake_marker")
+    let (output, code) = cm("flaky", "--loop:4")
+    check code == 1
+    check "FLAKY" in output
+    check "(passed 2/4)" in output
+
+  test "bail skips remaining suites":
+    let (output, code) = cm("bail", "--bail")
+    check code == 1
+    check "(not run)" in output
+    check "Bailed on first failure" in output
+
+  test "hanging test times out":
+    let (output, code) = cm("hanging")
+    check code == 1
+    check "(timed out)" in output
+
+  test "crash is attributed to the open test":
+    let (output, code) = cm("crashing")
+    check code == 1
+    check "dies mid test" in output
+    check "(crashed)" in output
+    check "SIGSEGV" in output
+
+  test "compile errors pass through verbatim":
+    let (output, code) = cm("compile_error")
+    check code == 1
+    check "(compile failed)" in output
+    check "undeclared identifier" in output
+
+  test "captured output is shown for failing files":
+    let (output, code) = cm("noisy")
+    check code == 1
+    check "setup chatter on stdout" in output
+    check "setup chatter on stderr" in output
+    check "inside the failing test" in output
+
+  test "binaries with their own params work when no filter is used":
+    let (_, code) = cm("own_params")
+    check code == 0
+
+  test "coverage reports project source lines":
+    let (output, code) = cm("covered")
+    check code == 0
+    check "Coverage (executed lines):" in output
+    check "src/mathlib.nim" in output
+    check "(8/11)" in output   # sign branches + neverCalled stay uncovered
+
+  test "list prints files without running":
+    # subcommand must come first; flags before it would dispatch to run
+    let (output, code) = execCmdEx(quoteShell(checkmateBin) & " list",
+                                   workingDir = fixture("passing"))
+    check code == 0
+    check "tests/t_ok.nim" in output
+    check "PASS" notin output
+
+suite "events protocol round trip":
+  test "inject module output parses into expected outcomes":
+    # run a fixture binary directly with the env var, as checkmate would
+    let (_, code) = cm("failing")
+    check code == 1
+    let binPath = fixture("failing") / ".checkmate" / "bin" / "tests__t_bad"
+    let evPath = getTempDir() / "checkmate_t_integration.jsonl"
+    removeFile(evPath)
+    let cmd = "CHECKMATE_EVENTS_FILE=" & quoteShell(evPath) & " " &
+              quoteShell(binPath) & " >/dev/null 2>&1"
+    let rc = execCmd("/bin/sh -c " & quoteShell(cmd))
+    check rc == 1
+    let outcome = foldEvents(parseEvents(evPath), rc, false)
+    removeFile(evPath)
+    check outcome.tests.len == 3
+    check outcome.tests[0].status == "FAILED"
+    check outcome.tests[0].suite == "broken"
+    check outcome.tests[0].checkpoints.len > 0
+    check outcome.tests[2].status == "OK"
+    check not outcome.crashed

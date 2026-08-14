@@ -1,0 +1,4 @@
+# jobs = 1 keeps the marker-file flip deterministic: iterations alternate
+# fail, pass, fail, pass ... so --loop:N yields exactly N/2 passes.
+[run]
+jobs = 1

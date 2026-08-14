@@ -1,0 +1,5 @@
+/checkmate
+.checkmate/
+tests/fixtures/flaky/flake_marker
+nimcache/
+.claude/settings.local.json

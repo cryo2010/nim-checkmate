@@ -1,0 +1,10 @@
+# checkmate's own test configuration (dogfooding)
+
+[tests]
+dirs = ["tests"]
+pattern = "t_*.nim"
+exclude = ["tests/fixtures/*"]
+
+[run]
+# t_integration shells out to fixtures serially; generous timeout
+timeout = 600

@@ -1,0 +1,198 @@
+## JSONL event protocol shared vocabulary: parse events emitted by the
+## injected formatter, fold them into per-run outcomes, aggregate across
+## loop iterations. The inject module cannot import this file (it must be
+## self-contained for embedding); an integration test keeps them in sync.
+
+import std/[json, os, sequtils, strutils, tables]
+import ./discovery
+
+type
+  EventKind* = enum
+    ekInit, ekSuiteStarted, ekTestStarted, ekFailure, ekTestEnded, ekSuiteEnded
+
+  Event* = object
+    kind*: EventKind
+    suite*: string
+    test*: string
+    status*: string
+    durMs*: float
+    checkpoints*: seq[string]
+    stack*: string
+
+  TestRun* = object
+    ## One test in one iteration.
+    suite*, name*: string
+    status*: string        # OK | FAILED | SKIPPED | CRASHED | TIMEOUT
+    durMs*: float
+    checkpoints*: seq[string]
+    stack*: string
+
+  FileRunOutcome* = object
+    tests*: seq[TestRun]
+    crashed*: bool         # abnormal termination detected
+    crashedTest*: string   # "" if crash outside any test
+    noTests*: bool
+
+  IterRun* = object
+    iteration*: int        # 1-based
+    exitCode*: int
+    timedOut*: bool
+    durMs*: float
+    logPath*: string
+    outcome*: FileRunOutcome
+
+  FileOutcome* = object
+    tf*: TestFile
+    compiled*: bool
+    compileLog*: string    # path to compile log
+    notRun*: bool          # skipped due to bail
+    runs*: seq[IterRun]
+
+  SuiteSummary* = object
+    files*: seq[FileOutcome]
+    bailed*: bool
+    wallMs*: float
+
+  FileStatus* = enum
+    fsPass, fsFail, fsFlaky, fsCompileFail, fsNotRun, fsNoTests
+
+  FailureDetail* = object
+    iteration*: int
+    status*: string
+    checkpoints*: seq[string]
+    stack*: string
+
+  TestOutcome* = object
+    ## One test aggregated across iterations.
+    suite*, name*: string
+    passes*, fails*, skips*: int
+    durationsMs*: seq[float]
+    failures*: seq[FailureDetail]
+
+const CrashedName* = "<no test running>"
+const ToplevelName* = "<top level>"
+
+proc parseEvents*(path: string): seq[Event] =
+  ## Tolerant parser: unknown event kinds and malformed/truncated lines
+  ## are skipped (crash resilience + forward compatibility).
+  if not fileExists(path):
+    return
+  for line in lines(path):
+    if line.strip.len == 0: continue
+    var node: JsonNode
+    try:
+      node = parseJson(line)
+    except CatchableError:
+      continue
+    if node.kind != JObject or not node.hasKey("e"): continue
+    var ev = Event()
+    case node["e"].getStr
+    of "init": ev.kind = ekInit
+    of "suiteStarted":
+      ev.kind = ekSuiteStarted
+      ev.suite = node{"suite"}.getStr
+    of "testStarted":
+      ev.kind = ekTestStarted
+      ev.test = node{"test"}.getStr
+    of "failure":
+      ev.kind = ekFailure
+      for c in node{"checkpoints"}.getElems:
+        ev.checkpoints.add c.getStr
+      ev.stack = node{"stack"}.getStr
+    of "testEnded":
+      ev.kind = ekTestEnded
+      ev.suite = node{"suite"}.getStr
+      ev.test = node{"test"}.getStr
+      ev.status = node{"status"}.getStr
+      ev.durMs = node{"durMs"}.getFloat
+    of "suiteEnded":
+      ev.kind = ekSuiteEnded
+    else:
+      continue
+    result.add ev
+
+proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool): FileRunOutcome =
+  ## Attribute failures to tests, detect crashes (testStarted without
+  ## testEnded + abnormal exit) and empty runs.
+  var openTest = ""
+  var openSuite = ""
+  var pendingCheckpoints: seq[string]
+  var pendingStack = ""
+  for ev in events:
+    case ev.kind
+    of ekInit: discard
+    of ekSuiteStarted: openSuite = ev.suite
+    of ekSuiteEnded: openSuite = ""
+    of ekTestStarted:
+      openTest = ev.test
+      pendingCheckpoints = @[]
+      pendingStack = ""
+    of ekFailure:
+      if openTest.len > 0:
+        pendingCheckpoints.add ev.checkpoints
+        if ev.stack.len > 0: pendingStack = ev.stack
+      else:
+        result.tests.add TestRun(
+          suite: openSuite, name: ToplevelName, status: "FAILED",
+          checkpoints: ev.checkpoints, stack: ev.stack)
+    of ekTestEnded:
+      result.tests.add TestRun(
+        suite: ev.suite, name: ev.test, status: ev.status,
+        durMs: ev.durMs, checkpoints: pendingCheckpoints, stack: pendingStack)
+      openTest = ""
+      pendingCheckpoints = @[]
+      pendingStack = ""
+  if openTest.len > 0 and (exitCode != 0 or timedOut):
+    result.crashed = not timedOut
+    result.crashedTest = openTest
+    result.tests.add TestRun(
+      suite: openSuite, name: openTest,
+      status: if timedOut: "TIMEOUT" else: "CRASHED",
+      checkpoints: pendingCheckpoints, stack: pendingStack)
+  elif result.tests.len == 0:
+    if exitCode != 0 or timedOut:
+      result.crashed = not timedOut
+    else:
+      result.noTests = true
+
+proc iterFailed*(run: IterRun): bool =
+  run.exitCode != 0 or run.timedOut or run.outcome.crashed
+
+proc fileStatus*(fo: FileOutcome): FileStatus =
+  if fo.notRun: return fsNotRun
+  if not fo.compiled: return fsCompileFail
+  if fo.runs.len == 0: return fsNotRun
+  var failed = 0
+  for run in fo.runs:
+    if run.iterFailed: inc failed
+  if failed == 0:
+    if fo.runs.allIt(it.outcome.noTests): return fsNoTests
+    fsPass
+  elif failed == fo.runs.len:
+    fsFail
+  else:
+    fsFlaky
+
+proc passedIters*(fo: FileOutcome): int =
+  for run in fo.runs:
+    if not run.iterFailed: inc result
+
+proc aggregateTests*(fo: FileOutcome): seq[TestOutcome] =
+  ## Merge per-iteration test runs by (suite, name), preserving first-seen order.
+  var index = initTable[string, int]()
+  for run in fo.runs:
+    for t in run.outcome.tests:
+      let key = t.suite & "::" & t.name
+      if not index.hasKey(key):
+        index[key] = result.len
+        result.add TestOutcome(suite: t.suite, name: t.name)
+      template agg: untyped = result[index[key]]
+      case t.status
+      of "OK": inc agg.passes
+      of "SKIPPED": inc agg.skips
+      else: inc agg.fails
+      if t.durMs > 0: agg.durationsMs.add t.durMs
+      if t.status notin ["OK", "SKIPPED"]:
+        agg.failures.add FailureDetail(
+          iteration: run.iteration, status: t.status,
+          checkpoints: t.checkpoints, stack: t.stack)
