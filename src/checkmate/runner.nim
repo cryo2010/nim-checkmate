@@ -88,6 +88,8 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
         id: meta.len, cmd: cmd,
         logPath: cfg.cacheDir / "logs" / files[fi].slug & "." & $iteration & ".log",
         workingDir: cfg.projectRoot,
+        serialKey: files[fi].slug,  # a file's iterations never overlap: test
+                                    # files own their resources exclusively
         env: @[("CHECKMATE_EVENTS_FILE", evPath)],
         timeoutSec: cfg.timeoutSec)
       meta.add (fi: fi, iteration: iteration)

@@ -107,7 +107,10 @@ Add `.checkmate/` (the build/state cache) to your `.gitignore`.
 ## Flake detection
 
 `--loop:N` compiles once and runs every file N times, interleaved so early
-iterations of all files finish first. A test that both passes and fails
+iterations of all files finish first. Iterations of the *same* file never
+run concurrently with each other (test files can assume exclusive ownership
+of their temp dirs, ports, databases, ...); different files still fill the
+`--jobs` workers. A test that both passes and fails
 across iterations is reported as flaky, and flaky suites fail the run:
 
 ```

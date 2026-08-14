@@ -2,7 +2,7 @@
 ## threads. Child output is captured via shell redirection to per-task log
 ## files, so there is no stream-reading deadlock and no interleaving.
 
-import std/[os, osproc, monotimes, strtabs, times]
+import std/[os, osproc, monotimes, sets, strtabs, times]
 
 type
   PoolTask* = object
@@ -10,6 +10,9 @@ type
     cmd*: string                  # a single command; run via `sh -c "exec cmd > log 2>&1"`
     logPath*: string
     workingDir*: string           # "" = inherit
+    serialKey*: string            # tasks sharing a nonempty key never run
+                                  # concurrently (e.g. loop iterations of one
+                                  # test file, which owns its resources)
     env*: seq[(string, string)]   # extra env merged over the parent env
     timeoutSec*: int              # 0 = no timeout
 
@@ -96,27 +99,40 @@ proc runPool*(tasks: seq[PoolTask], jobs: int,
              tuple[results: seq[PoolResult], bailed: bool, unstarted: seq[int]] =
   ## Runs tasks with up to `jobs` concurrent processes. onDone fires in
   ## completion order; returning pcBail kills live processes and skips the
-  ## rest (their ids are returned in `unstarted`).
+  ## rest (their ids are returned in `unstarted`). Tasks with the same
+  ## nonempty serialKey are never live simultaneously.
   let jobs = max(1, jobs)
-  var next = 0
+  var pending: seq[int]
+  for i in 0 ..< tasks.len:
+    pending.add i
   var live: seq[Live]
-  while next < tasks.len or live.len > 0:
-    while next < tasks.len and live.len < jobs:
-      var l = start(tasks[next])
-      l.taskIdx = next
-      live.add l
-      inc next
+  var liveKeys = initHashSet[string]()
+  while pending.len > 0 or live.len > 0:
+    var pi = 0
+    while pi < pending.len and live.len < jobs:
+      let idx = pending[pi]
+      let key = tasks[idx].serialKey
+      if key.len > 0 and key in liveKeys:
+        inc pi  # an iteration of this file is already running; try later
+      else:
+        var l = start(tasks[idx])
+        l.taskIdx = idx
+        live.add l
+        if key.len > 0:
+          liveKeys.incl key
+        pending.delete(pi)
     checkTimeouts(tasks, live)
     for (taskIdx, res) in reap(live):
       var res = res
       res.id = tasks[taskIdx].id
+      liveKeys.excl tasks[taskIdx].serialKey
       result.results.add res
       if onDone(tasks[taskIdx], res) == pcBail:
         result.bailed = true
         for (_, r) in reap(live, killAll = true):
           discard  # killed by bail: intentionally unreported
-        for i in next ..< tasks.len:
-          result.unstarted.add tasks[i].id
+        for idx in pending:
+          result.unstarted.add tasks[idx].id
         return
     if live.len > 0:
       sleep(25)
