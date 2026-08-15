@@ -2,7 +2,8 @@
 ## runOnce is the watch-mode seam: pure and re-invokable, no quit() here.
 
 import std/[cpuinfo, monotimes, os, strutils, times]
-import ./config, ./discovery, ./events, ./compiler, ./pool, ./report, ./coverage
+import ./config, ./discovery, ./events, ./compiler, ./pool, ./report, ./coverage,
+       ./shadow
 
 proc resolveJobs(cfg: Config): int =
   if cfg.jobs > 0: cfg.jobs else: max(1, countProcessors())
@@ -41,7 +42,13 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   # --- compile phase ---
   var ctasks: seq[CompileTask]
   var ptasks: seq[PoolTask]
-  let extraFlags = if cfg.covEnabled: covCompileFlags() else: @[]
+  var extraFlags = if cfg.covEnabled: covCompileFlags() else: newSeq[string]()
+  if not cfg.allowEmptyTests:
+    let farm = prepareLibFarm(cfg)
+    if farm.ok:
+      extraFlags.add "--lib:" & quoteShell(farm.dir)
+    else:
+      stderr.writeLine "checkmate: warning: " & farm.warning
   for i, tf in files:
     let ct = buildCompileTask(cfg, tf, extraFlags)
     ctasks.add ct
