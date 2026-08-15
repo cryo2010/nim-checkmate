@@ -10,7 +10,7 @@ exclude = ["tests/fixtures/*"]  # OVERRIDE (default []): fixtures are test data,
 jobs = 0                    # parallel workers; 0 = number of CPU cores
 loop = 1                    # run the whole suite N times (flake detection)
 loop_in_process = false     # loop inside one process per file (fast, lower fidelity)
-bail = false                # stop on first failing test file
+bail = false                # stop everything at the first failing test
 timeout = 300               # seconds a single test may run; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect

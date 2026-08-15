@@ -51,6 +51,17 @@ suite "foldEvents":
     check o.tests[0].checkpoints == @["check failed"]
     check o.tests[0].stack == "tb"
 
+  test "bail abort: failure then cut-off reports FAILED, not crashed":
+    let evs = @[
+      Event(kind: ekTestStarted, test: "aborted"),
+      Event(kind: ekFailure, checkpoints: @["check failed: x == 1"]),
+    ]
+    let o = foldEvents(evs, 1, false)
+    check not o.crashed
+    check o.tests.len == 1
+    check o.tests[0].status == "FAILED"
+    check o.tests[0].checkpoints == @["check failed: x == 1"]
+
   test "crash: started but never ended with nonzero exit":
     let evs = @[
       Event(kind: ekSuiteStarted, suite: "s"),

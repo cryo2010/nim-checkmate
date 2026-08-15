@@ -154,11 +154,18 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
           formatFloat(t.durMs / 1000, ffDecimal, 1) & " s > " &
           formatFloat(testTimeoutMs / 1000, ffDecimal, 1) & " s)"
   if openTest.len > 0 and (exitCode != 0 or timedOut):
-    result.crashed = not timedOut
-    result.crashedTest = openTest
+    # a recorded failure before the cut-off means the test FAILED and the
+    # binary stopped (bail's abortOnError quits before testEnded fires);
+    # only an eventless cut-off is a genuine crash
+    let status =
+      if timedOut: "TIMEOUT"
+      elif pendingCheckpoints.len > 0: "FAILED"
+      else: "CRASHED"
+    if status == "CRASHED":
+      result.crashed = true
+      result.crashedTest = openTest
     result.tests.add TestRun(
-      suite: openSuite, name: openTest,
-      status: if timedOut: "TIMEOUT" else: "CRASHED",
+      suite: openSuite, name: openTest, status: status,
       checkpoints: pendingCheckpoints, stack: pendingStack)
   elif result.tests.len == 0:
     if exitCode != 0 or timedOut:

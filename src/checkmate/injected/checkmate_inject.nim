@@ -50,6 +50,11 @@ method testEnded(cf: CheckmateFormatter, testResult: TestResult) =
 method suiteEnded(cf: CheckmateFormatter) =
   cf.emit(%*{"e": "suiteEnded"})
 
+# bail mode: abort the binary at the first failing test so remaining tests
+# and loop iterations never run (fail() emits failureOccurred, then quits)
+if getEnv("CHECKMATE_BAIL") == "1":
+  abortOnError = true
+
 let checkmateEventsFile = getEnv("CHECKMATE_EVENTS_FILE")
 if checkmateEventsFile.len > 0:
   try:

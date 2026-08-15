@@ -266,7 +266,7 @@ jobs = 0                  # parallel workers; 0 = number of CPU cores
 loop = 1                  # run the whole suite N times (flake detection)
 loop_in_process = false   # loop each test inside one process per file:
                           # much faster, but iterations share process state
-bail = false              # stop on first failing test file
+bail = false              # stop everything at the first failing test
 timeout = 300             # seconds a single test may run; hung or overlong
                           # tests fail and their file's process is killed
                           # (0 disables)

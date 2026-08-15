@@ -80,7 +80,7 @@ when isMainModule:
       "filter": "run tests whose name starts or ends with PAT (or raw unittest glob / suite::test)",
       "loop": "run the suite N times to catch flaky tests",
       "jobs": "parallel workers (0 = CPU cores)",
-      "bail": "stop on first failing test file",
+      "bail": "stop everything at the first failing test (aborts mid-file)",
       "timeout": "seconds a single test may run (0 disables)",
       "verbose": "per-test lines and captured output for passing files",
       "color": "auto|always|never",

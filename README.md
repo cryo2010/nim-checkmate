@@ -53,7 +53,7 @@ checkmate list [paths...]              # print discovered test files
 | `--time-travel` | freeze clocks; sleeps are instant, time advances virtually |
 | `--time-start T` | pin the virtual wall clock (ISO 8601) |
 | `-j`, `--jobs N` | parallel workers (default: CPU cores) |
-| `-b`, `--bail` | stop on the first failing test file |
+| `-b`, `--bail` | stop everything at the first failing test (aborts mid-file) |
 | `--timeout SECS` | seconds a single test may run (default 300; 0 disables) |
 | `-v`, `--verbose` | per-test result lines |
 | `--color auto\|always\|never` | color mode (`NO_COLOR` and `CI` are honored) |

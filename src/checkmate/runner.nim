@@ -130,6 +130,9 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
       if cfg.allowEmptyTests and farmOk:
         # farm in use (time travel) but enforcement opted out at runtime
         env.add ("CHECKMATE_ALLOW_EMPTY", "1")
+      if cfg.bail:
+        # first failing test aborts the binary mid-file (abortOnError)
+        env.add ("CHECKMATE_BAIL", "1")
       tasks.add PoolTask(
         id: meta.len, cmd: cmd,
         logPath: cfg.cacheDir / "logs" / files[fi].slug & "." & $iteration & ".log",

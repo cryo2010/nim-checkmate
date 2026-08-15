@@ -77,6 +77,20 @@ suite "fixture runs":
     check "(not run)" in output
     check "Bailed on first failure" in output
 
+  test "bail aborts a file mid-run at the first failing test":
+    # t_bad.nim: "wrong sum" fails first; "raises" and "still ok" follow
+    let (output, code) = cm("failing", "--bail")
+    check code == 1
+    check "wrong sum" in output
+    check "broken > raises" notin output   # never executed
+
+  test "bail cuts in-process loop iterations immediately":
+    removeFile(fixture("flaky") / "flake_marker")
+    let (output, code) = cm("flaky", "--loop:4 --loop-in-process --bail")
+    check code == 1
+    check "sometimes works" in output
+    check "always works" notin output      # iteration 1 aborted before it
+
   test "hanging test times out":
     let (output, code) = cm("hanging")
     check code == 1
