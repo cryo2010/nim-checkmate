@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 8
+const OverlayVersion = 9
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -269,9 +269,127 @@ proc travelTo*(t: Time) =
 proc travelTo*(dt: DateTime) =
   travelTo(dt.toTime())
 
-template check*(conditions: untyped): untyped =
-  inc checkmateAssertions
-  checkmateOrigCheck(conditions)
+# --- power-assert: subexpression recording through and/or/not -------------
+# Activates only when the top-level expression uses boolean connectives
+# (which stock check does not decompose at all); plain comparisons keep the
+# original path. Values are recorded AS the expression evaluates, so
+# short-circuit semantics are exact and unevaluated branches are reported
+# as such rather than evaluated speculatively (a nil-guarded dereference
+# must never run).
+
+var checkmateRecords* {.threadvar.}: seq[(string, string)]
+
+proc checkmateRecordVal*[T](val: T, exprText: string): T =
+  when compiles($val):
+    checkmateRecords.add((exprText, checkmateTrim($val)))
+  elif compiles(checkmateTrim(repr(val))):
+    checkmateRecords.add((exprText, checkmateTrim(repr(val))))
+  else:
+    checkmateRecords.add((exprText, "<unprintable>"))
+  val
+
+const checkmateCmpOps = ["==", "!=", "<", "<=", ">", ">=", "in", "notin",
+                         "is", "isnot"]
+
+proc checkmateIsInfixOf(n: NimNode, ops: openArray[string]): bool =
+  n.kind == nnkInfix and n.len == 3 and
+    n[0].kind in {nnkIdent, nnkOpenSymChoice, nnkClosedSymChoice, nnkSym} and
+    $n[0] in ops
+
+proc checkmateSkipOperand(n: NimNode): bool =
+  if n.kind in nnkLiterals: return true
+  if n.kind in {nnkNilLit, nnkBracket, nnkTupleConstr}: return true
+  if n.kind == nnkPrefix and n.len == 2 and n[0].kind == nnkIdent and
+      $n[0] == "@" and n[1].kind == nnkBracket:
+    return true
+  if n.kind == nnkIdent and $n in ["true", "false", "nil"]: return true
+  false
+
+proc checkmateWrapVal(n: NimNode, texts: var seq[string]): NimNode =
+  let txt = n.repr
+  texts.add txt
+  newCall(bindSym"checkmateRecordVal", n, newLit(txt))
+
+proc checkmateInstrument(n: NimNode, texts: var seq[string]): NimNode =
+  if n.kind == nnkPar and n.len == 1:
+    newTree(nnkPar, checkmateInstrument(n[0], texts))
+  elif checkmateIsInfixOf(n, ["and", "or"]):
+    newTree(nnkInfix, n[0], checkmateInstrument(n[1], texts),
+            checkmateInstrument(n[2], texts))
+  elif n.kind == nnkPrefix and n.len == 2 and n[0].kind == nnkIdent and
+      $n[0] == "not":
+    newTree(nnkPrefix, n[0], checkmateInstrument(n[1], texts))
+  elif checkmateIsInfixOf(n, checkmateCmpOps):
+    let origTxt = n.repr
+    var op1 = n[1]
+    var op2 = n[2]
+    if not checkmateSkipOperand(op1):
+      op1 = checkmateWrapVal(op1, texts)
+    if $n[0] notin ["is", "isnot"] and not checkmateSkipOperand(op2):
+      op2 = checkmateWrapVal(op2, texts)
+    let cmpNode = newTree(nnkInfix, n[0], op1, op2)
+    texts.add origTxt
+    newCall(bindSym"checkmateRecordVal", cmpNode, newLit(origTxt))
+  else:
+    checkmateWrapVal(n, texts)
+
+macro checkmatePowerCheck*(cond: untyped, lineTxt: static string): untyped =
+  # lineTxt is captured by the dispatching check macro BEFORE splicing:
+  # quote do would otherwise smear the overlay's own line info onto cond
+  var texts: seq[string]
+  let inst = checkmateInstrument(cond, texts)
+  let exprTxt = newLit(cond.repr)
+  let lineLit = newLit(lineTxt)
+  let textsLit = newLit(texts)
+  result = quote do:
+    block:
+      let checkmateRecStart = checkmateRecords.len
+      let checkmateCondVal = `inst`
+      if not checkmateCondVal:
+        checkpoint(`lineLit` & ": Check failed: " & `exprTxt`)
+        var checkmatePrinted: seq[(string, string)]
+        for checkmateK in checkmateRecStart ..< checkmateRecords.len:
+          if checkmateRecords[checkmateK] notin checkmatePrinted:
+            checkpoint(checkmateRecords[checkmateK][0] & " was " &
+                       checkmateRecords[checkmateK][1])
+            checkmatePrinted.add checkmateRecords[checkmateK]
+        for checkmateTxt in `textsLit`:
+          var checkmateFound = false
+          for checkmateK in checkmateRecStart ..< checkmateRecords.len:
+            if checkmateRecords[checkmateK][0] == checkmateTxt:
+              checkmateFound = true
+          if not checkmateFound:
+            checkpoint(checkmateTxt & " was not evaluated")
+        checkmateRecords.setLen(checkmateRecStart)
+        fail()
+      else:
+        checkmateRecords.setLen(checkmateRecStart)
+
+proc checkmateTopIsBool(n: NimNode): bool =
+  (n.kind == nnkInfix and n.len == 3 and
+   n[0].kind in {nnkIdent, nnkOpenSymChoice, nnkClosedSymChoice, nnkSym} and
+   $n[0] in ["and", "or"]) or
+  (n.kind == nnkPrefix and n.len == 2 and n[0].kind == nnkIdent and
+   $n[0] == "not") or
+  (n.kind == nnkPar and n.len == 1 and checkmateTopIsBool(n[0]))
+
+macro check*(conditions: untyped): untyped =
+  if conditions.kind == nnkStmtList:
+    result = newStmtList()
+    for node in conditions:
+      if node.kind != nnkCommentStmt:
+        result.add newCall(newIdentNode("check"), node)
+  elif checkmateTopIsBool(conditions):
+    let lineLit = newLit(conditions.lineInfo)
+    result = newStmtList(
+      newCall(newIdentNode("inc"), newIdentNode("checkmateAssertions")),
+      newCall(bindSym"checkmatePowerCheck", conditions, lineLit))
+  else:
+    # newCall shares the conditions node without copying: quote do would
+    # re-stamp its line info and break checkmateOrigCheck's callsite()
+    result = newStmtList(
+      newCall(newIdentNode("inc"), newIdentNode("checkmateAssertions")),
+      newCall(bindSym"checkmateOrigCheck", conditions))
 
 macro expect*(exceptions: varargs[typed], body: untyped): untyped =
   var origCall = newCall(newIdentNode("checkmateOrigExpect"))

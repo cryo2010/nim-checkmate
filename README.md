@@ -192,6 +192,20 @@ positions across the whole string. Control characters render as
 single-column placeholders inside the window (`␤` newline, `␍` CR,
 `␉` tab) so multiline strings keep the excerpt and carets on one line.
 
+Checks using `and`/`or`/`not` (which stock unittest does not decompose at
+all) get power-assert instrumentation: every subexpression records its
+value as it evaluates, so the report shows exactly what ran and what
+short-circuiting skipped, with guarded expressions never evaluated
+speculatively:
+
+```
+Check failed: conn != nil and conn.port == 443
+conn was nil
+conn != nil was false
+conn.port was not evaluated
+conn.port == 443 was not evaluated
+```
+
 ## Time travel
 
 `--time-travel` (or `[run] time_travel = true`) freezes the clocks inside
@@ -335,6 +349,7 @@ for manual testing:
 | `compile_error` | verbatim compiler error passthrough |
 | `empty_test` | empty-test enforcement, helper-proc counting, escape hatches |
 | `print_values` | enriched check output: repr fallback, value truncation |
+| `power_assert` | and/or/not decomposition with evaluation tracking |
 | `no_tests` | zero test files: fails unless `--pass-with-no-tests` |
 | `covered` | coverage table and `min_lines` gating |
 | `time_travel` | frozen clocks, pinned start, explicit API, async auto-advance |

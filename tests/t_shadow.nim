@@ -27,6 +27,7 @@ suite "patchUnittest":
     check "Test has no assertions" in patched
     check "checkmateTrim" in patched  # repr-fallback/truncation print patch
     check "checkmateExplainDiff" in patched  # ==-aware diff injection
+    check "checkmatePowerCheck" in patched   # and/or/not power-assert
 
   test "rejects unknown layout":
     check patchUnittest("template test*(name: string) = discard").len == 0

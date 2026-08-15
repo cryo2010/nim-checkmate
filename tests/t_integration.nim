@@ -229,6 +229,19 @@ suite "check output enrichment":
     check "five" & "␤" & "line one" in output
     check "lengths differ: 3 vs 5" in output
 
+suite "power assert":
+  test "boolean connectives decompose with evaluation tracking":
+    let (output, code) = cm("power_assert")
+    check code == 1
+    check "user.age was 16" in output
+    check "user.age >= 18 was false" in output
+    check "user.name.len was not evaluated" in output
+    check "conn was nil" in output
+    check "conn.port == 443 was not evaluated" in output   # guard held
+    check "code == 200 was false" in output
+    check "code == 204 was false" in output                # or: all attempted
+    check "tests/t_power.nim(14" in output                 # user-file lineinfo
+
 suite "time travel":
   test "virtual sleeps finish in real milliseconds":
     let t0 = getMonoTime()
