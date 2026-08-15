@@ -32,7 +32,8 @@ suite "fixture runs":
     let (output, code) = cm("failing")
     check code == 1
     check "● broken" in output   # suite heading above its failing tests
-    check "\n      tests/t_bad.nim(7, 16): Check failed: a + b == 5" in output
+    check "\n      7:  a + b == 5" in output      # file dropped: it's in the FAIL header
+    check "\n        a + b was 4" in output       # values nest under the check line
     check "a + b was 4" in output
     check "suites: 1/2 passed (1 failed)" in output
     check "tests:  2/4 passed (2 failed)" in output
@@ -241,7 +242,7 @@ suite "power assert":
     check "conn.port == 443 was not evaluated" in output   # guard held
     check "code == 200 was false" in output
     check "code == 204 was false" in output                # or: all attempted
-    check "tests/t_power.nim(14" in output                 # user-file lineinfo
+    check "14:  user.age >= 18 and user.name.len > 0" in output  # line-number header
     # Tier 2 diff windows compose with power-assert
     check "strings differ at index 100 (lengths 225 and 225, 1 differing position)" in output
     check "quick Qrown" in output

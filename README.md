@@ -12,8 +12,8 @@ detection, and line coverage.
  FAIL  tests/t_math.nim
   ● math ops
     addition works
-      tests/t_math.nim(12, 5): Check failed: a + b == 5
-      a + b was 4
+      12:  a + b == 5
+        a + b was 4
 
 suites: 1/3 passed (1 failed, 1 flaky)
 tests:  14/17 passed (2 failed, 1 flaky)
@@ -181,11 +181,11 @@ with windowed excerpts around it, and seqs/arrays report the first
 mismatching index and elements:
 
 ```
-Check failed: lhs == rhs
-strings differ at index 100 (lengths 201 and 201, 1 differing position)
-  lhs: ...aaaaaaaaaaaaaaaXaaaaaaaaaaaaaaaaaaaaaaaa...
-  rhs: ...aaaaaaaaaaaaaaaYaaaaaaaaaaaaaaaaaaaaaaaa...
-                        ^
+100:  lhs == rhs
+  strings differ at index 100 (lengths 201 and 201, 1 differing position)
+    lhs: ...aaaaaaaaaaaaaaaXaaaaaaaaaaaaaaaaaaaaaaaa...
+    rhs: ...aaaaaaaaaaaaaaaYaaaaaaaaaaaaaaaaaaaaaaaa...
+                          ^
 ```
 
 Every mismatching column inside the window gets its own caret, and for
@@ -201,11 +201,11 @@ short-circuiting skipped, with guarded expressions never evaluated
 speculatively:
 
 ```
-Check failed: conn != nil and conn.port == 443
-conn was nil
-conn != nil was false
-conn.port was not evaluated
-conn.port == 443 was not evaluated
+18:  conn != nil and conn.port == 443
+  conn was nil
+  conn != nil was false
+  conn.port was not evaluated
+  conn.port == 443 was not evaluated
 ```
 
 ## Time travel

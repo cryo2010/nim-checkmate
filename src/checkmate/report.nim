@@ -97,6 +97,33 @@ proc indented(text: string, prefix: string): string =
     lines.add prefix & line
   lines.join("\n")
 
+proc headerRewrite(cp, relPath: string): (bool, string) =
+  ## "relPath(line, col): [Check failed: ]expr" becomes "line:  expr".
+  ## Only for checkpoints pointing at the file already named in the FAIL
+  ## header; checks failing inside other modules keep their full path.
+  if not cp.startsWith(relPath & "("):
+    return (false, "")
+  var idx = relPath.len + 1
+  var lineNum = ""
+  while idx < cp.len and cp[idx] in {'0' .. '9'}:
+    lineNum.add cp[idx]
+    inc idx
+  if lineNum.len == 0 or idx >= cp.len or cp[idx] != ',':
+    return (false, "")
+  inc idx
+  while idx < cp.len and cp[idx] in {' ', '0' .. '9'}:
+    inc idx
+  if idx + 1 >= cp.len or cp[idx] != ')' or cp[idx + 1] != ':':
+    return (false, "")
+  idx += 2
+  while idx < cp.len and cp[idx] == ' ':
+    inc idx
+  var rest = cp[idx .. ^1]
+  const checkPrefix = "Check failed: "
+  if rest.startsWith(checkPrefix):
+    rest = rest[checkPrefix.len .. ^1]
+  (true, lineNum & ":  " & rest)
+
 proc capturedOutputBlock(r: Reporter, fo: FileOutcome) =
   for run in fo.runs:
     if run.iterFailed:
@@ -136,9 +163,15 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     echo base, r.red(t.name), suffix
     let f = t.failures[0]
     for cp in f.checkpoints:
-      echo indented(r.relativize(cp), cpIndent)
+      let rcp = r.relativize(cp)
+      let (isHeader, formatted) = headerRewrite(rcp, fo.tf.relPath)
+      if isHeader:
+        echo indented(formatted, cpIndent)
+      else:
+        echo indented(rcp, cpIndent & "  ")  # values nest under their header
     if f.stack.strip.len > 0:
-      echo r.dim(indented(r.relativize(f.stack.strip(leading = false)), cpIndent))
+      echo r.dim(indented(r.relativize(f.stack.strip(leading = false)),
+                          cpIndent & "  "))
     if t.failures.len > 1:
       const maxListed = 10
       var iters: seq[string]
@@ -146,7 +179,7 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
         iters.add $other.iteration
       # total failing iterations is exact even though details are capped
       let unlisted = t.fails - 1 - iters.len
-      var line = cpIndent & "also failed in iteration(s): " & iters.join(", ")
+      var line = cpIndent & "  also failed in iteration(s): " & iters.join(", ")
       if unlisted > 0:
         line.add " and " & $unlisted & " more"
       echo r.dim(line)
