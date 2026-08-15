@@ -180,6 +180,53 @@ proc fileStatus*(fo: FileOutcome): FileStatus =
   else:
     fsFlaky
 
+proc splitInProcessRuns*(outcome: FileRunOutcome, loopN, exitCode: int,
+                         timedOut: bool, durMs: float,
+                         logPath: string): seq[IterRun] =
+  ## Reconstructs per-iteration outcomes from one in-process-looped run:
+  ## the overlay repeats each test N times, so the k-th occurrence of a
+  ## test name belongs to iteration k. Iterations after a crash or timeout
+  ## never ran and are dropped (not counted as passed).
+  var occ = initTable[string, int]()
+  var slots = newSeq[FileRunOutcome](loopN)
+  for t in outcome.tests:
+    let key = t.suite & "::" & t.name
+    let k = min(occ.getOrDefault(key) + 1, loopN)
+    occ[key] = k
+    slots[k - 1].tests.add t
+    if t.status == "CRASHED":
+      slots[k - 1].crashed = true
+      slots[k - 1].crashedTest = t.name
+  if outcome.crashed and outcome.tests.len == 0:
+    slots[0].crashed = true
+  if outcome.noTests:
+    slots[0].noTests = true
+  var last = loopN - 1
+  for i in 0 ..< loopN:
+    if slots[i].crashed or slots[i].tests.anyIt(it.status == "TIMEOUT"):
+      last = i
+      break
+  if timedOut or exitCode != 0:
+    # killed between tests: trailing slots never ran, drop them
+    while last > 0 and slots[last].tests.len == 0 and not slots[last].crashed:
+      dec last
+  # unittest exits 1 whenever any iteration failed, so a nonzero exit is
+  # usually already explained by test statuses; only when it is NOT (e.g.
+  # quit(1) after all tests passed) does it get pinned on the last iteration
+  var explained = timedOut
+  for i in 0 .. last:
+    if slots[i].crashed or
+        slots[i].tests.anyIt(it.status notin ["OK", "SKIPPED"]):
+      explained = true
+      break
+  let perIterMs = durMs / (last + 1).float
+  for i in 0 .. last:
+    result.add IterRun(
+      iteration: i + 1,
+      exitCode: if i == last and not explained: exitCode else: 0,
+      timedOut: timedOut and i == last,
+      durMs: perIterMs, logPath: logPath, outcome: slots[i])
+
 proc totalTestsRun*(s: SuiteSummary): int =
   ## Distinct tests that executed (incl. skipped) across all files.
   for fo in s.files:

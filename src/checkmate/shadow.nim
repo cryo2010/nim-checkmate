@@ -17,7 +17,7 @@
 import std/[json, os, osproc, strutils]
 import ./config
 
-const OverlayVersion = 1
+const OverlayVersion = 2
 
 const anchorPatches: seq[(string, string)] = @[
   # 1: declare the counter before every later reference, rename check
@@ -50,7 +50,10 @@ macro checkmateOrigCheck*(conditions: untyped): untyped ="""),
 
 const wrapperBlock = """
 
-# --- checkmate: empty-test enforcement (generated overlay, part 2) --------
+# --- checkmate: generated overlay, part 2 ---------------------------------
+
+import std/os as checkmateOs
+from std/strutils as checkmateStrutils import parseInt
 
 template check*(conditions: untyped): untyped =
   inc checkmateAssertions
@@ -65,14 +68,31 @@ macro expect*(exceptions: varargs[typed], body: untyped): untyped =
     inc checkmateAssertions
     `origCall`
 
+var checkmateLoopNCache = -1
+
+proc checkmateLoopCount*(): int =
+  ## In-process loop count from CHECKMATE_LOOP; 1 (stock) when unset/invalid.
+  if checkmateLoopNCache < 0:
+    checkmateLoopNCache = 1
+    let v = checkmateOs.getEnv("CHECKMATE_LOOP")
+    if v.len > 0:
+      try:
+        checkmateLoopNCache = max(1, checkmateStrutils.parseInt(v))
+      except ValueError:
+        discard
+  checkmateLoopNCache
+
 template test*(name, body) {.dirty.} =
-  checkmateOrigTest name:
-    let checkmateAssertionsBefore {.used.} = checkmateAssertions
-    body
-    if checkmateAssertions == checkmateAssertionsBefore and
-        testStatusIMPL == TestStatus.OK:
-      checkpoint("Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)")
-      fail()
+  # the loop wraps the ORIGINAL test template, so suite setup/teardown and
+  # testStarted/testEnded events all fire once per iteration
+  for checkmateLoopIter in 1 .. checkmateLoopCount():
+    checkmateOrigTest name:
+      let checkmateAssertionsBefore {.used.} = checkmateAssertions
+      body
+      if checkmateAssertions == checkmateAssertionsBefore and
+          testStatusIMPL == TestStatus.OK:
+        checkpoint("Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)")
+        fail()
 """
 
 proc resolveNimLib*(cfg: Config): string =

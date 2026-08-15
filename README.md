@@ -49,6 +49,7 @@ checkmate list [paths...]              # print discovered test files
 | `paths...` | test files (verbatim) or directories (walked with the filename pattern) |
 | `-t`, `--filter PAT` | run tests whose name starts or ends with PAT; repeatable (OR'd) |
 | `-l`, `--loop N` | run the whole suite N times to catch flaky tests |
+| `--loop-in-process` | loop each test inside one process per file (fast, lower fidelity) |
 | `-j`, `--jobs N` | parallel workers (default: CPU cores) |
 | `-b`, `--bail` | stop on the first failing test file |
 | `--timeout SECS` | per-test-binary timeout (default 300; 0 disables) |
@@ -87,6 +88,7 @@ exclude = []              # path globs, e.g. ["tests/fixtures/*"]
 [run]
 jobs = 0                  # 0 = CPU cores
 loop = 1
+loop_in_process = false   # loop inside one process per file (fast, lower fidelity)
 bail = false
 timeout = 300             # seconds per test binary; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
@@ -116,8 +118,10 @@ Add `.checkmate/` (the build/state cache) to your `.gitignore`.
 iterations of all files finish first. Iterations of the *same* file never
 run concurrently with each other (test files can assume exclusive ownership
 of their temp dirs, ports, databases, ...); different files still fill the
-`--jobs` workers. A test that both passes and fails
-across iterations is reported as flaky, and flaky suites fail the run:
+`--jobs` workers.
+
+A test that both passes and fails across iterations is reported as flaky,
+and flaky suites fail the run:
 
 ```
  FLAKY tests/t_net.nim (passed 8/10)
@@ -125,6 +129,18 @@ across iterations is reported as flaky, and flaky suites fail the run:
     tests/t_net.nim(31, 10): Check failed: reconnected
     also failed in iteration(s): 4, 7
 ```
+
+`--loop-in-process` is an opt-in fast mode: each file runs as ONE process
+and every test repeats N times inside it (suite setup/teardown re-run per
+iteration). This skips N-1 process spawns and module initializations per
+file, but iterations share process state, which changes what you measure:
+flakes that only appear with a fresh process stay hidden, and a test that
+mutates module-level state may look flaky when it never would across real
+runs. A crash or timeout also ends all remaining iterations of that file,
+and the per-file timeout budget covers all N iterations. Use it for quick
+statistical sweeps; trust plain `--loop` for verdicts. Requires the
+unittest overlay (see Empty-test enforcement); when the overlay is
+unavailable it warns and falls back to process-level looping.
 
 ## Empty-test enforcement
 

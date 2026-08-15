@@ -58,6 +58,19 @@ suite "fixture runs":
     check "FLAKY" in output
     check "(passed 2/4)" in output
 
+  test "in-process loop detects flakes with correct iteration counts":
+    removeFile(fixture("flaky") / "flake_marker")
+    let (output, code) = cm("flaky", "--loop:4 --loop-in-process")
+    check code == 1
+    check "FLAKY" in output
+    check "(passed 2/4)" in output
+    check "(flaky: failed 2/4)" in output
+
+  test "in-process loop falls back without the overlay":
+    let (output, code) = cm("passing", "--loop:2 --loop-in-process --allow-empty-tests")
+    check code == 0
+    check "falling back to process-level looping" in output
+
   test "bail skips remaining suites":
     let (output, code) = cm("bail", "--bail")
     check code == 1

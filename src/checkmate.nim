@@ -13,12 +13,13 @@ proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
            loop = 0; jobs = 0; bail = false; timeout = -1;
            verbose = false; color = ""; nimflags: seq[string] = @[];
            coverage = false; passWithNoTests = false;
-           allowEmptyTests = false; minLines = 0.0): int =
+           allowEmptyTests = false; minLines = 0.0;
+           loopInProcess = false): int =
   ## Discover, compile, and run std/unittest test files.
   try:
     var cfg = loadConfig(findProjectRoot(getCurrentDir()))
     cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
-                 passWithNoTests, allowEmptyTests, minLines)
+                 passWithNoTests, allowEmptyTests, minLines, loopInProcess)
     let rep = newReporter(cfg, filtered = filter.len > 0)
     let summary = runOnce(cfg, paths, filter, rep)
     if summary.files.len == 0:
@@ -84,6 +85,7 @@ when isMainModule:
       "passWithNoTests": "exit 0 even when zero tests were run",
       "allowEmptyTests": "don't fail tests that execute zero assertions",
       "minLines": "coverage gate: min percent, or max uncovered lines if negative",
+      "loopInProcess": "loop inside one process per file (fast, lower fidelity)",
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
     help = {"force": "overwrite an existing checkmate.toml"})

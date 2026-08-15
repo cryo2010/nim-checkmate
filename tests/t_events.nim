@@ -81,6 +81,55 @@ suite "foldEvents":
     check o.tests.len == 1
     check o.tests[0].name == ToplevelName
 
+suite "splitInProcessRuns":
+  proc tr(name, status: string): TestRun =
+    TestRun(name: name, status: status, durMs: 1)
+
+  test "k-th occurrence lands in iteration k":
+    let outcome = FileRunOutcome(tests: @[
+      tr("a", "OK"), tr("a", "FAILED"), tr("a", "OK"),
+      tr("b", "OK"), tr("b", "OK"), tr("b", "OK")])
+    let runs = splitInProcessRuns(outcome, 3, 1, false, 30.0, "log")
+    check runs.len == 3
+    for r in runs:
+      check r.outcome.tests.len == 2
+    check runs[1].outcome.tests[0].status == "FAILED"
+    check runs[1].iterFailed
+    check not runs[0].iterFailed
+    var fo = FileOutcome(compiled: true, runs: runs)
+    check fileStatus(fo) == fsFlaky
+    check fo.passedIters == 2
+
+  test "iterations after a crash are dropped":
+    let outcome = FileRunOutcome(tests: @[
+      tr("a", "OK"), tr("a", "CRASHED")], crashed: true, crashedTest: "a")
+    let runs = splitInProcessRuns(outcome, 5, 139, false, 10.0, "log")
+    check runs.len == 2
+    check runs[1].outcome.crashed
+    check runs[1].outcome.crashedTest == "a"
+
+  test "timeout marks the final executed iteration":
+    let outcome = FileRunOutcome(tests: @[
+      tr("a", "OK"), tr("a", "TIMEOUT")])
+    let runs = splitInProcessRuns(outcome, 4, 143, true, 10.0, "log")
+    check runs.len == 2
+    check runs[1].timedOut
+    check not runs[0].timedOut
+
+  test "suite-level crash with no tests lands in iteration 1":
+    let outcome = FileRunOutcome(crashed: true)
+    let runs = splitInProcessRuns(outcome, 3, 139, false, 3.0, "log")
+    check runs.len == 1
+    check runs[0].outcome.crashed
+
+  test "quit(0)-style masked exit still fails the final iteration":
+    let outcome = FileRunOutcome(tests: @[
+      tr("a", "OK"), tr("a", "OK")])
+    let runs = splitInProcessRuns(outcome, 2, 1, false, 2.0, "log")
+    check runs.len == 2
+    check not runs[0].iterFailed
+    check runs[1].iterFailed  # nonzero process exit lands on the last iteration
+
 suite "aggregation":
   proc iterRun(iteration, exit: int, tests: seq[TestRun]): IterRun =
     IterRun(iteration: iteration, exitCode: exit,

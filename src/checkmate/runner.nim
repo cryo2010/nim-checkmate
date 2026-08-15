@@ -43,12 +43,19 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   var ctasks: seq[CompileTask]
   var ptasks: seq[PoolTask]
   var extraFlags = if cfg.covEnabled: covCompileFlags() else: newSeq[string]()
+  var farmOk = false
   if not cfg.allowEmptyTests:
     let farm = prepareLibFarm(cfg)
+    farmOk = farm.ok
     if farm.ok:
       extraFlags.add "--lib:" & quoteShell(farm.dir)
     else:
       stderr.writeLine "checkmate: warning: " & farm.warning
+  var inProcessLoop = cfg.loopInProcess and cfg.loop > 1
+  if inProcessLoop and not farmOk:
+    stderr.writeLine "checkmate: warning: loop_in_process needs the unittest " &
+      "overlay (unavailable here); falling back to process-level looping"
+    inProcessLoop = false
   for i, tf in files:
     let ct = buildCompileTask(cfg, tf, extraFlags)
     ctasks.add ct
@@ -82,23 +89,32 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   for i in 0 ..< files.len:
     if fos[i].compiled: runnable.add i
   let filterStr = filterArgs(filters)
+  # in-process loop: one process per file, the overlay repeats each test
+  # CHECKMATE_LOOP times; otherwise one process per (file, iteration)
+  let itersPerFile = if inProcessLoop: 1 else: cfg.loop
+  var taskTimeout = cfg.timeoutSec
+  if inProcessLoop and taskTimeout > 0:
+    taskTimeout *= cfg.loop  # one timeout budget now covers all iterations
   var tasks: seq[PoolTask]
   var meta: seq[tuple[fi, iteration: int]]
   var evPaths: seq[string]
-  for iteration in 1 .. cfg.loop:       # file-major interleave: all files at
+  for iteration in 1 .. itersPerFile:   # file-major interleave: all files at
     for fi in runnable:                 # iteration k before iteration k+1
       let evPath = cfg.cacheDir / "events" / files[fi].slug & "." & $iteration & ".jsonl"
       removeFile(evPath)
       var cmd = quoteShell(ctasks[fi].binPath)
       if filterStr.len > 0: cmd.add " " & filterStr
+      var env = @[("CHECKMATE_EVENTS_FILE", evPath)]
+      if inProcessLoop:
+        env.add ("CHECKMATE_LOOP", $cfg.loop)
       tasks.add PoolTask(
         id: meta.len, cmd: cmd,
         logPath: cfg.cacheDir / "logs" / files[fi].slug & "." & $iteration & ".log",
         workingDir: cfg.projectRoot,
         serialKey: files[fi].slug,  # a file's iterations never overlap: test
                                     # files own their resources exclusively
-        env: @[("CHECKMATE_EVENTS_FILE", evPath)],
-        timeoutSec: cfg.timeoutSec)
+        env: env,
+        timeoutSec: taskTimeout)
       meta.add (fi: fi, iteration: iteration)
       evPaths.add evPath
 
@@ -109,18 +125,22 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
     proc(t: PoolTask, r: PoolResult): PoolCtl =
       let (fi, iteration) = meta[t.id]
       let outcome = foldEvents(parseEvents(evPaths[t.id]), r.exitCode, r.timedOut)
-      fos[fi].runs.add IterRun(
-        iteration: iteration, exitCode: r.exitCode, timedOut: r.timedOut,
-        durMs: r.durationMs, logPath: t.logPath, outcome: outcome)
+      if inProcessLoop:
+        fos[fi].runs = splitInProcessRuns(
+          outcome, loopN, r.exitCode, r.timedOut, r.durationMs, t.logPath)
+      else:
+        fos[fi].runs.add IterRun(
+          iteration: iteration, exitCode: r.exitCode, timedOut: r.timedOut,
+          durMs: r.durationMs, logPath: t.logPath, outcome: outcome)
       inc completed[fi]
-      if completed[fi] == loopN:
+      if completed[fi] == itersPerFile:
         rep.fileLine(fos[fi])
       if bailOnFail and (r.exitCode != 0 or r.timedOut): pcBail
       else: pcContinue)
   bailed = rbailed
   if bailed:
     for fi in runnable:
-      if completed[fi] < loopN:
+      if completed[fi] < itersPerFile:
         if fos[fi].runs.len == 0:
           fos[fi].notRun = true
         rep.fileLine(fos[fi])

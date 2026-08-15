@@ -17,6 +17,7 @@ type
     # [run]
     jobs*: int          # 0 = CPU cores
     loop*: int
+    loopInProcess*: bool  # loop inside one process per file (fast, lower fidelity)
     bail*: bool
     timeoutSec*: int    # 0 disables
     passWithNoTests*: bool  # zero tests run is a pass instead of a failure
@@ -116,8 +117,8 @@ proc getBool(v: TomlValueRef, ctx: string, default: bool): bool =
 proc warnUnknownKeys(toml: TomlValueRef) =
   const known = {
     "tests": @["dirs", "pattern", "exclude"],
-    "run": @["jobs", "loop", "bail", "timeout", "pass_with_no_tests",
-             "allow_empty_tests"],
+    "run": @["jobs", "loop", "loop_in_process", "bail", "timeout",
+             "pass_with_no_tests", "allow_empty_tests"],
     "compile": @["nim", "backend", "flags", "defines", "paths"],
     "output": @["color", "verbose"],
     "coverage": @["enabled", "min_lines"],
@@ -154,6 +155,8 @@ proc loadConfig*(root: string): Config =
   let run = toml.tget("run")
   result.jobs = run.tget("jobs").getInt("run.jobs", result.jobs)
   result.loop = run.tget("loop").getInt("run.loop", result.loop)
+  result.loopInProcess = run.tget("loop_in_process").getBool(
+    "run.loop_in_process", result.loopInProcess)
   result.bail = run.tget("bail").getBool("run.bail", result.bail)
   result.timeoutSec = run.tget("timeout").getInt("run.timeout", result.timeoutSec)
   result.passWithNoTests = run.tget("pass_with_no_tests").getBool(
@@ -188,7 +191,8 @@ proc loadConfig*(root: string): Config =
 
 proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverage: bool;
                color: string; nimFlags: seq[string]; passWithNoTests = false;
-               allowEmptyTests = false; minLines = 0.0) =
+               allowEmptyTests = false; minLines = 0.0;
+               loopInProcess = false) =
   ## Sentinels mark "not passed": loop=0, jobs=0 means unset only when 0 is
   ## also the config default meaning (cores), timeout=-1, color="".
   if loop > 0: cfg.loop = loop
@@ -200,6 +204,7 @@ proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverag
   if color.len > 0: cfg.color = parseColorMode(color)
   if passWithNoTests: cfg.passWithNoTests = true
   if allowEmptyTests: cfg.allowEmptyTests = true
+  if loopInProcess: cfg.loopInProcess = true
   if minLines != 0:
     if minLines > 100:
       raise newException(UsageError, "--min-lines cannot exceed 100")
@@ -219,6 +224,8 @@ exclude = []              # path globs to skip, e.g. ["tests/fixtures/*"]
 [run]
 jobs = 0                  # parallel workers; 0 = number of CPU cores
 loop = 1                  # run the whole suite N times (flake detection)
+loop_in_process = false   # loop each test inside one process per file:
+                          # much faster, but iterations share process state
 bail = false              # stop on first failing test file
 timeout = 300             # seconds per test binary; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
