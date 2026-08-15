@@ -120,16 +120,19 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
   ## to TIMEOUT (hung tests are killed by the pool's progress watchdog
   ## before they can complete; this catches the slow-but-finishing rest).
   var openTest = ""
-  var openSuite = ""
+  var suiteStack: seq[string]   # suites can nest; testEnded carries its own
   var pendingCheckpoints: seq[string]
   var pendingStack = ""
   var pendingFailure = false
   var nameCounts = initTable[string, int]()
+  template openSuite: string =
+    (if suiteStack.len > 0: suiteStack[^1] else: "")
   for ev in events:
     case ev.kind
     of ekInit: discard
-    of ekSuiteStarted: openSuite = ev.suite
-    of ekSuiteEnded: openSuite = ""
+    of ekSuiteStarted: suiteStack.add ev.suite
+    of ekSuiteEnded:
+      if suiteStack.len > 0: suiteStack.setLen(suiteStack.len - 1)
     of ekTestStarted:
       openTest = ev.test
       pendingCheckpoints = @[]

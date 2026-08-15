@@ -289,6 +289,26 @@ their output captured per run; each file gets a private nimcache, so
 parallel compiles are safe and unchanged files rebuild in well under a
 second. Test-name filters are passed straight to unittest's own filtering.
 
+## Repaired std/unittest quirks
+
+Some std/unittest behaviors misreport results to any formatter-based
+observer; checkmate detects and repairs them (the `quirks` fixture
+demonstrates each):
+
+- **Failures in helper procs**: `fail()`/failing `check`s outside the test
+  body cannot set the test's status (a compile-time scoping quirk), so the
+  test ends "OK" despite the failure. checkmate treats the failure event as
+  authoritative and reports the test FAILED, annotating checkpoint-less
+  `fail()` calls.
+- **`skip()` after a failure** reports SKIPPED in stock unittest even
+  though the exit code says failed; checkmate reports FAILED with the
+  failure detail.
+- **Duplicate test names** are distinct tests, disambiguated as
+  `name (2)` so they cannot masquerade as a flaky single test (not
+  applicable under `--loop-in-process`, where repetition encodes
+  iterations).
+- **Nested suites** are tracked as a stack for crash attribution.
+
 ## Limitations
 
 - **Test-name filters are not regexes.** `std/unittest` supports only
@@ -356,3 +376,4 @@ for manual testing:
 | `covered` | coverage table and `min_lines` gating |
 | `time_travel` | frozen clocks, pinned start, explicit API, async auto-advance |
 | `own_params` | documented argv-clash limitation with `-t` |
+| `quirks` | std/unittest edge cases checkmate repairs (see below) |

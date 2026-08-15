@@ -236,6 +236,16 @@ suite "check output enrichment":
     check "five" & "␤" & "line one" in output
     check "lengths differ: 3 vs 5" in output
 
+suite "unittest quirk repairs":
+  test "helper bare-fail, duplicate names, and skip-after-fail are truthful":
+    let (output, code) = cm("quirks")
+    check code == 1
+    check "fail() was called (no checkpoint recorded)" in output
+    check "duplicate name (2)" in output       # distinct test, not a flake
+    check "(flaky" notin output
+    check "skips after failing" in output      # FAILED, not silently skipped
+    check "1/4 passed (3 failed)" in output
+
 suite "power assert":
   test "boolean connectives decompose with evaluation tracking":
     let (output, code) = cm("power_assert")

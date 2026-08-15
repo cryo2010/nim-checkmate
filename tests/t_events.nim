@@ -106,6 +106,16 @@ suite "foldEvents":
     check o.tests[0].status == "FAILED"
     check o.tests[0].checkpoints == @["check failed: x == 1"]
 
+  test "nested suites: crash after inner suite ends keeps outer attribution":
+    let evs = @[
+      Event(kind: ekSuiteStarted, suite: "outer"),
+      Event(kind: ekSuiteStarted, suite: "inner"),
+      Event(kind: ekSuiteEnded),
+      Event(kind: ekTestStarted, test: "boom"),
+    ]
+    let o = foldEvents(evs, 139, false)
+    check o.tests[0].suite == "outer"
+
   test "crash: started but never ended with nonzero exit":
     let evs = @[
       Event(kind: ekSuiteStarted, suite: "s"),
