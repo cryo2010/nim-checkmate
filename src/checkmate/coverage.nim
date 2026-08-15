@@ -56,12 +56,18 @@ proc parseGcovFile(path: string, into: var CovLines, projectRoot, cacheDir: stri
     let executed = count != "#####" and count != "====="
     into[source][lineNo] = into[source].getOrDefault(lineNo, false) or executed
 
-proc covReport*(cfg: Config): bool =
-  ## Prints a per-file coverage table; returns false if no data was found.
+type CovStats* = object
+  ok*: bool                # coverage data was produced
+  covered*, total*: int    # merged line counts across all binaries
+  worstFile*: string       # project-relative file with the most uncovered lines
+  worstUncovered*: int
+
+proc covReport*(cfg: Config): CovStats =
+  ## Prints a per-file coverage table; result.ok is false if no data was found.
   let tool = gcovCmd()
   if tool.len == 0:
     stderr.writeLine "checkmate: coverage: no gcov tool found (need xcrun, llvm-cov or gcov)"
-    return false
+    return
   var merged: CovLines
   let ncRoot = cfg.cacheDir / "nimcache"
   # gcov must run from the project root: Nim emits #line paths relative to
@@ -86,12 +92,11 @@ proc covReport*(cfg: Config): bool =
       removeFile(gcovFile)
   if merged.len == 0:
     stderr.writeLine "checkmate: coverage: no coverage data produced"
-    return false
+    return
 
   var files = newSeq[string]()
   for f in merged.keys: files.add f
   files.sort
-  var totalCovered, totalLines = 0
   echo ""
   echo "Coverage (executed lines):"
   for f in files:
@@ -99,12 +104,40 @@ proc covReport*(cfg: Config): bool =
     for _, hit in merged[f]:
       inc total
       if hit: inc covered
-    totalCovered += covered
-    totalLines += total
+    result.covered += covered
+    result.total += total
+    if total - covered > result.worstUncovered:
+      result.worstUncovered = total - covered
+      result.worstFile = relativePath(f, cfg.projectRoot)
     let pct = if total > 0: 100.0 * covered.float / total.float else: 0.0
     echo "  ", relativePath(f, cfg.projectRoot).alignLeft(44), " ",
          formatFloat(pct, ffDecimal, 1).align(5), "%  (", covered, "/", total, ")"
-  let totalPct = if totalLines > 0: 100.0 * totalCovered.float / totalLines.float else: 0.0
+  let totalPct = if result.total > 0: 100.0 * result.covered.float / result.total.float else: 0.0
   echo "  ", "TOTAL".alignLeft(44), " ",
-       formatFloat(totalPct, ffDecimal, 1).align(5), "%  (", totalCovered, "/", totalLines, ")"
-  true
+       formatFloat(totalPct, ffDecimal, 1).align(5), "%  (", result.covered, "/", result.total, ")"
+  result.ok = true
+
+proc covGateFailure*(cfg: Config, stats: CovStats): string =
+  ## "" when the min_lines gate is met, unset, or no data; else the failure
+  ## message. Positive min_lines = minimum percent; negative = max allowed
+  ## uncovered lines (jest-style, friendlier for small projects).
+  if not stats.ok or cfg.covMinLines == 0:
+    return ""
+  let uncovered = stats.total - stats.covered
+  var worst = ""
+  if stats.worstUncovered > 0:
+    worst = " (" & stats.worstFile & " has the most uncovered lines: " &
+            $stats.worstUncovered & ")"
+  if cfg.covMinLines > 0:
+    let pct = if stats.total > 0: 100.0 * stats.covered.float / stats.total.float
+              else: 0.0
+    if pct < cfg.covMinLines:
+      return "coverage " & formatFloat(pct, ffDecimal, 1) &
+             "% is below the required minimum of " &
+             formatFloat(cfg.covMinLines, ffDecimal, 1) & "%" & worst
+  else:
+    let allowed = int(-cfg.covMinLines)
+    if uncovered > allowed:
+      return "coverage has " & $uncovered &
+             " uncovered lines, more than the allowed " & $allowed & worst
+  ""

@@ -32,6 +32,7 @@ type
     verbose*: bool
     # [coverage]
     covEnabled*: bool
+    covMinLines*: float  # >0: min percent; <0: max uncovered lines; 0: no gate
     # resolved at load time
     projectRoot*: string
     cacheDir*: string
@@ -98,6 +99,14 @@ proc getInt(v: TomlValueRef, ctx: string, default: int): int =
     raise newException(UsageError, ConfigFileName & ": " & ctx & " must be an integer")
   v.intVal.int
 
+proc getFloat(v: TomlValueRef, ctx: string, default: float): float =
+  if v == nil: return default
+  case v.kind
+  of TomlValueKind.Float: v.floatVal
+  of TomlValueKind.Int: v.intVal.float
+  else:
+    raise newException(UsageError, ConfigFileName & ": " & ctx & " must be a number")
+
 proc getBool(v: TomlValueRef, ctx: string, default: bool): bool =
   if v == nil: return default
   if v.kind != TomlValueKind.Bool:
@@ -111,7 +120,7 @@ proc warnUnknownKeys(toml: TomlValueRef) =
              "allow_empty_tests"],
     "compile": @["nim", "backend", "flags", "defines", "paths"],
     "output": @["color", "verbose"],
-    "coverage": @["enabled"],
+    "coverage": @["enabled", "min_lines"],
   }.toOrderedTable
   if toml.kind != TomlValueKind.Table: return
   for section, node in toml.tableVal:
@@ -165,6 +174,10 @@ proc loadConfig*(root: string): Config =
 
   let coverage = toml.tget("coverage")
   result.covEnabled = coverage.tget("enabled").getBool("coverage.enabled", result.covEnabled)
+  result.covMinLines = coverage.tget("min_lines").getFloat(
+    "coverage.min_lines", result.covMinLines)
+  if result.covMinLines > 100:
+    raise newException(UsageError, ConfigFileName & ": coverage.min_lines cannot exceed 100")
 
   if result.loop < 1:
     raise newException(UsageError, ConfigFileName & ": run.loop must be >= 1")
@@ -175,7 +188,7 @@ proc loadConfig*(root: string): Config =
 
 proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverage: bool;
                color: string; nimFlags: seq[string]; passWithNoTests = false;
-               allowEmptyTests = false) =
+               allowEmptyTests = false; minLines = 0.0) =
   ## Sentinels mark "not passed": loop=0, jobs=0 means unset only when 0 is
   ## also the config default meaning (cores), timeout=-1, color="".
   if loop > 0: cfg.loop = loop
@@ -187,6 +200,10 @@ proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverag
   if color.len > 0: cfg.color = parseColorMode(color)
   if passWithNoTests: cfg.passWithNoTests = true
   if allowEmptyTests: cfg.allowEmptyTests = true
+  if minLines != 0:
+    if minLines > 100:
+      raise newException(UsageError, "--min-lines cannot exceed 100")
+    cfg.covMinLines = minLines
   cfg.nimFlags.add nimFlags
 
 # --- checkmate init -------------------------------------------------------
@@ -220,6 +237,8 @@ verbose = false           # also show per-test lines and passing tests' output
 
 [coverage]
 enabled = false           # line coverage via gcov (needs xcrun, llvm-cov or gcov)
+min_lines = 0             # coverage gate: minimum percent (e.g. 80.0) or, if
+                          # negative, max uncovered lines (e.g. -50); 0 disables
 """
 
 proc writeInitToml*(dir: string, force: bool): string =

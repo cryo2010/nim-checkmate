@@ -56,6 +56,7 @@ checkmate list [paths...]              # print discovered test files
 | `--color auto\|always\|never` | color mode (`NO_COLOR` is honored) |
 | `-n`, `--nimflags FLAG` | extra flags for `nim c`; repeatable |
 | `--coverage` | print a line-coverage table after the run |
+| `--min-lines N` | coverage gate: minimum percent, or max uncovered lines if negative |
 | `--pass-with-no-tests` | exit 0 even when zero tests were run |
 | `--allow-empty-tests` | don't fail tests that execute zero assertions |
 
@@ -104,6 +105,7 @@ verbose = false
 
 [coverage]
 enabled = false
+min_lines = 0             # gate: min percent (80.0) or max uncovered lines (-50)
 ```
 
 Add `.checkmate/` (the build/state cache) to your `.gitignore`.
@@ -158,7 +160,16 @@ Coverage (executed lines):
 ```
 
 Line hits are merged across all test binaries and loop iterations. Needs
-`xcrun` (macOS), `llvm-cov`, or `gcov` on PATH. Only files inside the
+`xcrun` (macOS), `llvm-cov`, or `gcov` on PATH.
+
+`min_lines` turns coverage into a CI gate: a passing test run still exits 1
+when total line coverage is below the threshold. Positive values are a
+minimum percentage; negative values cap the absolute number of uncovered
+lines (steadier than percentages for small projects):
+
+```
+checkmate: coverage 72.7% is below the required minimum of 80.0% (src/mathlib.nim has the most uncovered lines: 3)
+``` Only files inside the
 project are reported; test files themselves may be partially attributed to
 `std/unittest` templates by gcov and are best read indicatively.
 

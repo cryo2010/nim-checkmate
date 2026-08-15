@@ -13,12 +13,12 @@ proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
            loop = 0; jobs = 0; bail = false; timeout = -1;
            verbose = false; color = ""; nimflags: seq[string] = @[];
            coverage = false; passWithNoTests = false;
-           allowEmptyTests = false): int =
+           allowEmptyTests = false; minLines = 0.0): int =
   ## Discover, compile, and run std/unittest test files.
   try:
     var cfg = loadConfig(findProjectRoot(getCurrentDir()))
     cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
-                 passWithNoTests, allowEmptyTests)
+                 passWithNoTests, allowEmptyTests, minLines)
     let rep = newReporter(cfg, filtered = filter.len > 0)
     let summary = runOnce(cfg, paths, filter, rep)
     if summary.files.len == 0:
@@ -26,9 +26,16 @@ proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
         $cfg.dirs & ", pattern: " & cfg.pattern & ")"
       return exitCodeFor(summary, cfg.passWithNoTests)
     rep.finish(summary)
+    var covGate = ""
     if cfg.covEnabled:
-      discard covReport(cfg)
+      covGate = covGateFailure(cfg, covReport(cfg))
+    elif cfg.covMinLines != 0:
+      stderr.writeLine "checkmate: warning: coverage.min_lines is set " &
+        "but coverage is not enabled"
     result = exitCodeFor(summary, cfg.passWithNoTests)
+    if covGate.len > 0:
+      stderr.writeLine "checkmate: " & covGate
+      if result == 0: result = 1
     if result != 0 and totalTestsRun(summary) == 0 and not summary.bailed:
       stderr.writeLine "checkmate: failing because no tests were run " &
         "(use --pass-with-no-tests to allow this)"
@@ -76,6 +83,7 @@ when isMainModule:
       "coverage": "report line coverage (needs xcrun, llvm-cov or gcov)",
       "passWithNoTests": "exit 0 even when zero tests were run",
       "allowEmptyTests": "don't fail tests that execute zero assertions",
+      "minLines": "coverage gate: min percent, or max uncovered lines if negative",
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
     help = {"force": "overwrite an existing checkmate.toml"})

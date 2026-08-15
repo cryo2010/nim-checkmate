@@ -50,6 +50,19 @@ color = "never"
     check cfg.color == cmNever
     check cfg.allowEmptyTests
 
+  test "coverage min_lines accepts float, int and negative":
+    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nenabled = true\nmin_lines = 80.5\n")
+    check loadConfig(tmpRoot).covMinLines == 80.5
+    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nmin_lines = -50\n")
+    check loadConfig(tmpRoot).covMinLines == -50.0
+    check defaultConfig().covMinLines == 0.0
+    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nmin_lines = 101\n")
+    expect UsageError:
+      discard loadConfig(tmpRoot)
+    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nmin_lines = \"lots\"\n")
+    expect UsageError:
+      discard loadConfig(tmpRoot)
+
   test "invalid toml raises UsageError":
     writeFile(tmpRoot / "checkmate.toml", "[run]\nloop = \"three\"\n")
     expect UsageError:

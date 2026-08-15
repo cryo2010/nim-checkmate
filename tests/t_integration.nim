@@ -100,6 +100,28 @@ suite "fixture runs":
     check "src/mathlib.nim" in output
     check "(8/11)" in output   # sign branches + neverCalled stay uncovered
 
+  test "min_lines percent gate fails below threshold":
+    let (output, code) = cm("covered", "--min-lines:80")
+    check code == 1
+    check "below the required minimum of 80.0%" in output
+    check "src/mathlib.nim has the most uncovered lines: 3" in output
+
+  test "min_lines percent gate passes at threshold":
+    let (_, code) = cm("covered", "--min-lines:70")
+    check code == 0
+
+  test "negative min_lines caps uncovered lines":
+    let (output, code) = cm("covered", "--min-lines:-2")
+    check code == 1
+    check "3 uncovered lines, more than the allowed 2" in output
+    let (_, okCode) = cm("covered", "--min-lines:-3")
+    check okCode == 0
+
+  test "min_lines without coverage warns":
+    let (output, code) = cm("passing", "--min-lines:80")
+    check code == 0
+    check "min_lines is set but coverage is not enabled" in output
+
   test "empty test fails by default":
     let (output, code) = cm("empty_test")
     check code == 1
