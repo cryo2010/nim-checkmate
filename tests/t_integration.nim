@@ -154,6 +154,21 @@ suite "fixture runs":
     check "tests/t_ok.nim" in output
     check "PASS" notin output
 
+suite "init generation":
+  test "init writes checkmate.toml, refuses overwrite, honors --force":
+    let dir = getTempDir() / "checkmate_t_init"
+    removeDir(dir)
+    createDir(dir)
+    let (_, code) = execCmdEx(quoteShell(checkmateBin) & " init", workingDir = dir)
+    check code == 0
+    check fileExists(dir / "checkmate.toml")
+    let (_, again) = execCmdEx(quoteShell(checkmateBin) & " init", workingDir = dir)
+    check again == 2  # refuses to overwrite
+    let (_, forced) = execCmdEx(quoteShell(checkmateBin) & " init --force",
+                                workingDir = dir)
+    check forced == 0
+    removeDir(dir)
+
 suite "events protocol round trip":
   test "inject module output parses into expected outcomes":
     # run a fixture binary directly with the env var, as checkmate would
