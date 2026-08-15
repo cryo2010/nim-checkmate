@@ -185,6 +185,14 @@ suite "aggregation":
       runs: @[iterRun(1, 0, @[tr("t", "FAILED")])])
     check fileStatus(fo) == fsFail
 
+  test "stored failure details are capped, counts stay exact":
+    var fo = FileOutcome(compiled: true)
+    for i in 1 .. 100:
+      fo.runs.add iterRun(i, 1, @[tr("t", "FAILED")])
+    let agg = aggregateTests(fo)
+    check agg[0].fails == 100
+    check agg[0].failures.len == maxStoredFailures
+
   test "file status precedence":
     check fileStatus(FileOutcome(compiled: false)) == fsCompileFail
     check fileStatus(FileOutcome(compiled: false, notRun: true)) == fsNotRun

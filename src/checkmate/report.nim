@@ -131,9 +131,16 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     if f.stack.strip.len > 0:
       echo r.dim(indented(r.relativize(f.stack.strip(leading = false)), "    "))
     if t.failures.len > 1:
+      const maxListed = 10
       var iters: seq[string]
-      for other in t.failures[1 .. ^1]: iters.add $other.iteration
-      echo r.dim("    also failed in iteration(s): " & iters.join(", "))
+      for other in t.failures[1 .. min(maxListed, t.failures.len - 1)]:
+        iters.add $other.iteration
+      # total failing iterations is exact even though details are capped
+      let unlisted = t.fails - 1 - iters.len
+      var line = "    also failed in iteration(s): " & iters.join(", ")
+      if unlisted > 0:
+        line.add " and " & $unlisted & " more"
+      echo r.dim(line)
   # suite-level crash with no attributable test
   var anyTestFailure = false
   for t in aggregateTests(fo):

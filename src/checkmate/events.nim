@@ -71,6 +71,7 @@ type
 
 const CrashedName* = "<no test running>"
 const ToplevelName* = "<top level>"
+const maxStoredFailures* = 20  # per test; counts are exact, details capped
 
 proc parseEvents*(path: string): seq[Event] =
   ## Tolerant parser: unknown event kinds and malformed/truncated lines
@@ -273,7 +274,9 @@ proc aggregateTests*(fo: FileOutcome): seq[TestOutcome] =
       of "SKIPPED": inc agg.skips
       else: inc agg.fails
       if t.durMs > 0: agg.durationsMs.add t.durMs
-      if t.status notin ["OK", "SKIPPED"]:
+      if t.status notin ["OK", "SKIPPED"] and agg.failures.len < maxStoredFailures:
+        # counts (fails/passes) are tracked above; details are only for
+        # display, so a huge --loop must not hoard checkpoints per failure
         agg.failures.add FailureDetail(
           iteration: run.iteration, status: t.status,
           checkpoints: t.checkpoints, stack: t.stack)
