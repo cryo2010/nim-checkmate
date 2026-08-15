@@ -31,7 +31,8 @@ suite "fixture runs":
   test "failing fixture reports checkpoints and exits 1":
     let (output, code) = cm("failing")
     check code == 1
-    check "\n    tests/t_bad.nim(7, 16): Check failed: a + b == 5" in output
+    check "● broken" in output   # suite heading above its failing tests
+    check "\n      tests/t_bad.nim(7, 16): Check failed: a + b == 5" in output
     check "a + b was 4" in output
     check "suites: 1/2 passed (1 failed)" in output
     check "tests:  2/4 passed (2 failed)" in output
@@ -82,7 +83,7 @@ suite "fixture runs":
     let (output, code) = cm("failing", "--bail")
     check code == 1
     check "wrong sum" in output
-    check "broken > raises" notin output   # never executed
+    check "raises" notin output   # never executed
 
   test "bail cuts in-process loop iterations immediately":
     removeFile(fixture("flaky") / "flake_marker")
@@ -182,7 +183,7 @@ suite "fixture runs":
     let (output, code) = cm("empty_test")
     check code == 1
     check "Test has no assertions" in output
-    check "empty enforcement > has no assertions" in output
+    check "● empty enforcement" in output
     check "tests:  4/6 passed (1 failed, 1 skipped)" in output
 
   test "allow-empty-tests disables enforcement":

@@ -10,9 +10,10 @@ detection, and line coverage.
  FLAKY tests/t_net.nim (passed 8/10)
 
  FAIL  tests/t_math.nim
-  math ops > addition works
-    tests/t_math.nim(12, 5): Check failed: a + b == 5
-    a + b was 4
+  ● math ops
+    addition works
+      tests/t_math.nim(12, 5): Check failed: a + b == 5
+      a + b was 4
 
 suites: 1/3 passed (1 failed, 1 flaky)
 tests:  14/17 passed (2 failed, 1 flaky)
@@ -155,8 +156,9 @@ fails:
 
 ```
  FAIL  tests/t_api.nim
-  users > fetches the profile
-    Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)
+  ● users
+    fetches the profile
+      Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)
 ```
 
 Counting happens at runtime, so assertions made inside helper procs (in any

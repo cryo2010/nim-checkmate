@@ -115,8 +115,17 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     let content = if fileExists(fo.compileLog): readFile(fo.compileLog) else: ""
     echo indented(r.relativize(content.strip(leading = false)), "  ")
     return
+  var currentSuite = "\0"  # sentinel: no suite announced yet
   for t in aggregateTests(fo):
     if t.failures.len == 0: continue
+    if t.suite != currentSuite:
+      currentSuite = t.suite
+      if t.suite.len > 0:
+        echo "  ", r.red("●"), " ", r.bold(t.suite)
+    # tests inside a suite nest under its heading; standalone tests keep
+    # the flat layout
+    let base = if t.suite.len > 0: "    " else: "  "
+    let cpIndent = base & "  "
     var suffix = ""
     let n = t.passes + t.fails + t.skips
     case t.failures[0].status
@@ -124,12 +133,12 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     of "TIMEOUT": suffix = " " & r.red("(timed out)")
     else:
       if t.passes > 0: suffix = " " & r.yellow("(flaky: failed " & $t.fails & "/" & $n & ")")
-    echo "  ", r.red(testTitle(t)), suffix
+    echo base, r.red(t.name), suffix
     let f = t.failures[0]
     for cp in f.checkpoints:
-      echo indented(r.relativize(cp), "    ")
+      echo indented(r.relativize(cp), cpIndent)
     if f.stack.strip.len > 0:
-      echo r.dim(indented(r.relativize(f.stack.strip(leading = false)), "    "))
+      echo r.dim(indented(r.relativize(f.stack.strip(leading = false)), cpIndent))
     if t.failures.len > 1:
       const maxListed = 10
       var iters: seq[string]
@@ -137,7 +146,7 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
         iters.add $other.iteration
       # total failing iterations is exact even though details are capped
       let unlisted = t.fails - 1 - iters.len
-      var line = "    also failed in iteration(s): " & iters.join(", ")
+      var line = cpIndent & "also failed in iteration(s): " & iters.join(", ")
       if unlisted > 0:
         line.add " and " & $unlisted & " more"
       echo r.dim(line)
