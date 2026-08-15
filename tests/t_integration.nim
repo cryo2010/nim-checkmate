@@ -223,6 +223,7 @@ suite "check output enrichment":
     # divergence past the 400-char truncation window: only the diff shows it
     check "strings differ at index 1500 (lengths 2000 and 2000)" in output
     check "brownZfox" in output
+    check "^\n" in output   # caret line under the divergence column
     check "lengths differ: 3 vs 5" in output
 
 suite "time travel":

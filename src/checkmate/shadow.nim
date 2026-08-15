@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 5
+const OverlayVersion = 6
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -145,6 +145,16 @@ proc checkmateExplainDiff*(a, b: string) =
              " (lengths " & $a.len & " and " & $b.len & ")")
   checkpoint("  lhs: " & checkmateWindow(a, i))
   checkpoint("  rhs: " & checkmateWindow(b, i))
+  # caret under the divergence column; keep in sync with checkmateWindow
+  let checkmateCaretLo = max(0, i - 15)
+  var checkmateCaretCol = len("  rhs: ") + (i - checkmateCaretLo)
+  if checkmateCaretLo > 0:
+    checkmateCaretCol += 3  # the "..." prefix
+  var checkmateCaretLine = ""
+  for _ in 1 .. checkmateCaretCol:
+    checkmateCaretLine.add ' '
+  checkmateCaretLine.add '^'
+  checkpoint(checkmateCaretLine)
 
 proc checkmateExplainDiffSeq[T](a, b: openArray[T]) =
   var i = 0

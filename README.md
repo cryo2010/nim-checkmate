@@ -183,6 +183,7 @@ Check failed: lhs == rhs
 strings differ at index 100 (lengths 201 and 201)
   lhs: ...aaaaaaaaaaaaaaaXaaaaaaaaaaaaaaaaaaaaaaaa...
   rhs: ...aaaaaaaaaaaaaaaYaaaaaaaaaaaaaaaaaaaaaaaa...
+                        ^
 ```
 
 ## Time travel
