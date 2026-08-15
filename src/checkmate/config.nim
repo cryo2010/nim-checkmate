@@ -20,6 +20,7 @@ type
     bail*: bool
     timeoutSec*: int    # 0 disables
     passWithNoTests*: bool  # zero tests run is a pass instead of a failure
+    allowEmptyTests*: bool  # don't fail tests that execute zero assertions
     # [compile]
     nimBin*: string
     backend*: string
@@ -106,7 +107,8 @@ proc getBool(v: TomlValueRef, ctx: string, default: bool): bool =
 proc warnUnknownKeys(toml: TomlValueRef) =
   const known = {
     "tests": @["dirs", "pattern", "exclude"],
-    "run": @["jobs", "loop", "bail", "timeout", "pass_with_no_tests"],
+    "run": @["jobs", "loop", "bail", "timeout", "pass_with_no_tests",
+             "allow_empty_tests"],
     "compile": @["nim", "backend", "flags", "defines", "paths"],
     "output": @["color", "verbose"],
     "coverage": @["enabled"],
@@ -147,6 +149,8 @@ proc loadConfig*(root: string): Config =
   result.timeoutSec = run.tget("timeout").getInt("run.timeout", result.timeoutSec)
   result.passWithNoTests = run.tget("pass_with_no_tests").getBool(
     "run.pass_with_no_tests", result.passWithNoTests)
+  result.allowEmptyTests = run.tget("allow_empty_tests").getBool(
+    "run.allow_empty_tests", result.allowEmptyTests)
 
   let compile = toml.tget("compile")
   result.nimBin = compile.tget("nim").getStr("compile.nim", result.nimBin)
@@ -170,7 +174,8 @@ proc loadConfig*(root: string): Config =
 # --- CLI merge ------------------------------------------------------------
 
 proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverage: bool;
-               color: string; nimFlags: seq[string]; passWithNoTests = false) =
+               color: string; nimFlags: seq[string]; passWithNoTests = false;
+               allowEmptyTests = false) =
   ## Sentinels mark "not passed": loop=0, jobs=0 means unset only when 0 is
   ## also the config default meaning (cores), timeout=-1, color="".
   if loop > 0: cfg.loop = loop
@@ -181,6 +186,7 @@ proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverag
   if coverage: cfg.covEnabled = true
   if color.len > 0: cfg.color = parseColorMode(color)
   if passWithNoTests: cfg.passWithNoTests = true
+  if allowEmptyTests: cfg.allowEmptyTests = true
   cfg.nimFlags.add nimFlags
 
 # --- checkmate init -------------------------------------------------------
@@ -199,6 +205,7 @@ loop = 1                  # run the whole suite N times (flake detection)
 bail = false              # stop on first failing test file
 timeout = 300             # seconds per test binary; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
+allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
 
 [compile]
 nim = "nim"               # compiler executable

@@ -12,12 +12,13 @@ const checkmateVersion = "0.1.0"
 proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
            loop = 0; jobs = 0; bail = false; timeout = -1;
            verbose = false; color = ""; nimflags: seq[string] = @[];
-           coverage = false; passWithNoTests = false): int =
+           coverage = false; passWithNoTests = false;
+           allowEmptyTests = false): int =
   ## Discover, compile, and run std/unittest test files.
   try:
     var cfg = loadConfig(findProjectRoot(getCurrentDir()))
     cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
-                 passWithNoTests)
+                 passWithNoTests, allowEmptyTests)
     let rep = newReporter(cfg, filtered = filter.len > 0)
     let summary = runOnce(cfg, paths, filter, rep)
     if summary.files.len == 0:
@@ -74,6 +75,7 @@ when isMainModule:
       "nimflags": "extra flags passed to nim c",
       "coverage": "report line coverage (needs xcrun, llvm-cov or gcov)",
       "passWithNoTests": "exit 0 even when zero tests were run",
+      "allowEmptyTests": "don't fail tests that execute zero assertions",
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
     help = {"force": "overwrite an existing checkmate.toml"})

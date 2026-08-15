@@ -17,6 +17,7 @@ suite "config defaults and toml":
     check cfg.loop == 1
     check cfg.timeoutSec == 300
     check cfg.color == cmAuto
+    check not cfg.allowEmptyTests
 
   test "load without toml keeps defaults and sets roots":
     let cfg = loadConfig(tmpRoot)
@@ -33,6 +34,7 @@ exclude = ["spec/fixtures/*"]
 loop = 3
 bail = true
 timeout = 10
+allow_empty_tests = true
 [compile]
 flags = ["-d:release"]
 [output]
@@ -46,6 +48,7 @@ color = "never"
     check cfg.timeoutSec == 10
     check cfg.nimFlags == @["-d:release"]
     check cfg.color == cmNever
+    check cfg.allowEmptyTests
 
   test "invalid toml raises UsageError":
     writeFile(tmpRoot / "checkmate.toml", "[run]\nloop = \"three\"\n")
