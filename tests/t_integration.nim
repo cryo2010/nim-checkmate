@@ -97,6 +97,27 @@ suite "fixture runs":
     check "never finishes" in output
     check "(timed out)" in output
 
+  test "project with no test files fails with a clear message":
+    let (output, code) = cm("no_tests")
+    check code == 1
+    check "no test files found" in output
+
+  test "project with no test files passes with --pass-with-no-tests":
+    let (_, code) = cm("no_tests", "--pass-with-no-tests")
+    check code == 0
+
+  test "one-second timeout kills a two-second sleeper":
+    let (output, code) = cm("sleepy")
+    check code == 1
+    check "sleeps for 2 seconds" in output
+    check "(timed out)" in output
+
+  test "chdir flag runs a fixture from anywhere":
+    let (_, code) = execCmdEx(
+      quoteShell(checkmateBin) & " --color:never -C " &
+      quoteShell(fixture("passing")))
+    check code == 0
+
   test "timeout is per test, not per file":
     # t_steady runs 4.5 s total against a 2 s timeout, but each test
     # resets the progress watchdog, so the file passes
