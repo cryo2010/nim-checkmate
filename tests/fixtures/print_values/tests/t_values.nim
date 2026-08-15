@@ -24,3 +24,14 @@ test "long strings show the first difference":
 
 test "seqs show the first mismatching index":
   check @[1, 2, 3, 4] == @[1, 2, 9, 4]
+
+test "difference beyond the truncation window":
+  # both printed values truncate to identical 400-char prefixes; only the
+  # diff line reveals where they diverge
+  var expected = "the quick brown fox jumps over the lazy dog. ".repeat(45)[0 ..< 2000]
+  var actual = expected
+  actual[1500] = 'Z'
+  check actual == expected
+
+test "seqs of different lengths":
+  check @[1, 2, 3] == @[1, 2, 3, 4, 5]
