@@ -63,6 +63,27 @@ color = "never"
     expect UsageError:
       discard loadConfig(tmpRoot)
 
+  test "time travel config parses and validates":
+    writeFile(tmpRoot / "checkmate.toml",
+      "[run]\ntime_travel = true\ntime_start = \"2020-06-15T12:00:00Z\"\n")
+    let cfg = loadConfig(tmpRoot)
+    check cfg.timeTravel
+    check cfg.timeStart == "2020-06-15T12:00:00Z"
+    check not defaultConfig().timeTravel
+    writeFile(tmpRoot / "checkmate.toml", "[run]\ntime_start = \"soonish\"\n")
+    expect UsageError:
+      discard loadConfig(tmpRoot)
+
+  test "parseTimeStartNs accepts the documented formats":
+    check parseTimeStartNs("2020-06-15T12:00:00Z") ==
+      1_592_222_400'i64 * 1_000_000_000'i64
+    check parseTimeStartNs("2020-06-15T12:00:00") > 0
+    check parseTimeStartNs("2020-06-15") > 0
+    expect UsageError:
+      discard parseTimeStartNs("June 15th 2020")
+    expect UsageError:
+      discard parseTimeStartNs("1930-01-01")  # pre-1970
+
   test "invalid toml raises UsageError":
     writeFile(tmpRoot / "checkmate.toml", "[run]\nloop = \"three\"\n")
     expect UsageError:

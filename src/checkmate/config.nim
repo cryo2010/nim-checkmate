@@ -1,6 +1,6 @@
 ## Configuration: defaults <- checkmate.toml <- CLI flags.
 
-import std/[os, strutils, terminal]
+import std/[os, strutils, terminal, times]
 import parsetoml
 
 type
@@ -22,6 +22,8 @@ type
     timeoutSec*: int    # per-test budget (progress-based); 0 disables
     passWithNoTests*: bool  # zero tests run is a pass instead of a failure
     allowEmptyTests*: bool  # don't fail tests that execute zero assertions
+    timeTravel*: bool       # virtualize clocks: sleep instant, time frozen
+    timeStart*: string      # ISO 8601 pin for the virtual wall clock; "" = now
     # [compile]
     nimBin*: string
     backend*: string
@@ -80,6 +82,24 @@ proc colorsEnabled*(cfg: Config): bool =
     autoColorAllowed(isatty(stdout), getEnv("NO_COLOR"), getEnv("TERM"),
                      getEnv("CI"))
 
+proc parseTimeStartNs*(s: string): int64 =
+  ## time_start value to Unix epoch nanoseconds; UsageError on bad input.
+  var t: Time
+  var parsed = false
+  for fmt in ["yyyy-MM-dd'T'HH:mm:sszzz", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"]:
+    try:
+      t = parse(s, fmt).toTime
+      parsed = true
+      break
+    except CatchableError:
+      discard
+  if not parsed:
+    raise newException(UsageError, "invalid time_start '" & s &
+      "' (accepted: 2020-06-15T12:00:00Z, 2020-06-15T12:00:00, 2020-06-15)")
+  result = t.toUnix * 1_000_000_000'i64 + t.nanosecond
+  if result < 0:
+    raise newException(UsageError, "time_start must not be before 1970")
+
 # --- TOML loading ---------------------------------------------------------
 
 proc tget(t: TomlValueRef, key: string): TomlValueRef =
@@ -127,7 +147,8 @@ proc warnUnknownKeys(toml: TomlValueRef) =
   const known = {
     "tests": @["dirs", "pattern", "exclude"],
     "run": @["jobs", "loop", "loop_in_process", "bail", "timeout",
-             "pass_with_no_tests", "allow_empty_tests"],
+             "pass_with_no_tests", "allow_empty_tests", "time_travel",
+             "time_start"],
     "compile": @["nim", "backend", "flags", "defines", "paths"],
     "output": @["color", "verbose"],
     "coverage": @["enabled", "min_lines"],
@@ -172,6 +193,12 @@ proc loadConfig*(root: string): Config =
     "run.pass_with_no_tests", result.passWithNoTests)
   result.allowEmptyTests = run.tget("allow_empty_tests").getBool(
     "run.allow_empty_tests", result.allowEmptyTests)
+  result.timeTravel = run.tget("time_travel").getBool(
+    "run.time_travel", result.timeTravel)
+  result.timeStart = run.tget("time_start").getStr(
+    "run.time_start", result.timeStart)
+  if result.timeStart.len > 0:
+    discard parseTimeStartNs(result.timeStart)  # validate early
 
   let compile = toml.tget("compile")
   result.nimBin = compile.tget("nim").getStr("compile.nim", result.nimBin)
@@ -201,7 +228,7 @@ proc loadConfig*(root: string): Config =
 proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverage: bool;
                color: string; nimFlags: seq[string]; passWithNoTests = false;
                allowEmptyTests = false; minLines = 0.0;
-               loopInProcess = false) =
+               loopInProcess = false; timeTravel = false; timeStart = "") =
   ## Sentinels mark "not passed": loop=0, jobs=0 means unset only when 0 is
   ## also the config default meaning (cores), timeout=-1, color="".
   if loop > 0: cfg.loop = loop
@@ -214,6 +241,10 @@ proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverag
   if passWithNoTests: cfg.passWithNoTests = true
   if allowEmptyTests: cfg.allowEmptyTests = true
   if loopInProcess: cfg.loopInProcess = true
+  if timeTravel: cfg.timeTravel = true
+  if timeStart.len > 0:
+    discard parseTimeStartNs(timeStart)  # validate
+    cfg.timeStart = timeStart
   if minLines != 0:
     if minLines > 100:
       raise newException(UsageError, "--min-lines cannot exceed 100")
@@ -241,6 +272,10 @@ timeout = 300             # seconds a single test may run; hung or overlong
                           # (0 disables)
 pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
+time_travel = false       # virtualize clocks: sleep() is instant, time is frozen
+                          # and only advances via sleep/advanceTime/travelTo
+time_start = ""           # pin the virtual wall clock, e.g. "2020-06-15T12:00:00Z"
+                          # (ISO 8601; empty = current time at run start)
 
 [compile]
 nim = "nim"               # compiler executable

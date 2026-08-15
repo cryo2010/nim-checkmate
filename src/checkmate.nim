@@ -14,12 +14,13 @@ proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
            verbose = false; color = ""; nimflags: seq[string] = @[];
            coverage = false; passWithNoTests = false;
            allowEmptyTests = false; minLines = 0.0;
-           loopInProcess = false): int =
+           loopInProcess = false; timeTravel = false; timeStart = ""): int =
   ## Discover, compile, and run std/unittest test files.
   try:
     var cfg = loadConfig(findProjectRoot(getCurrentDir()))
     cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
-                 passWithNoTests, allowEmptyTests, minLines, loopInProcess)
+                 passWithNoTests, allowEmptyTests, minLines, loopInProcess,
+                 timeTravel, timeStart)
     let rep = newReporter(cfg, filtered = filter.len > 0)
     let summary = runOnce(cfg, paths, filter, rep)
     if summary.files.len == 0:
@@ -33,6 +34,9 @@ proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
     elif cfg.covMinLines != 0:
       stderr.writeLine "checkmate: warning: coverage.min_lines is set " &
         "but coverage is not enabled"
+    if cfg.timeStart.len > 0 and not cfg.timeTravel:
+      stderr.writeLine "checkmate: warning: time_start is set " &
+        "but time_travel is not enabled"
     result = exitCodeFor(summary, cfg.passWithNoTests)
     if covGate.len > 0:
       stderr.writeLine "checkmate: " & covGate
@@ -86,6 +90,8 @@ when isMainModule:
       "allowEmptyTests": "don't fail tests that execute zero assertions",
       "minLines": "coverage gate: min percent, or max uncovered lines if negative",
       "loopInProcess": "loop inside one process per file (fast, lower fidelity)",
+      "timeTravel": "freeze clocks; sleeps are instant, time advances virtually",
+      "timeStart": "pin the virtual start time (ISO 8601), e.g. 2020-06-15T12:00:00Z",
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
     help = {"force": "overwrite an existing checkmate.toml"})
