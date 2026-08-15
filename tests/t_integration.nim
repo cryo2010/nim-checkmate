@@ -243,6 +243,10 @@ suite "path display":
     check " ...nested/directory/structure/t_long.nim " in output
     check "tests/very/deeply" notin output   # prefix elided
     check "\n    4:  false" in output        # same-file header still matches
+    # [format] caps from the fixture config (30/30/30)
+    check "● this suite name is quite lo..." in output
+    check "this test name is also exce..." in output
+    check "012345678901234567890123456789 ... (170 more chars)" in output
 
 suite "unittest quirk repairs":
   test "helper bare-fail, duplicate names, and skip-after-fail are truthful":

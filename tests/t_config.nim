@@ -84,6 +84,23 @@ color = "never"
     expect UsageError:
       discard parseTimeStartNs("1930-01-01")  # pre-1970
 
+  test "format caps parse with defaults and validate":
+    let defaults = defaultConfig()
+    check defaults.fmtMaxPath == 44
+    check defaults.fmtMaxSuite == 60
+    check defaults.fmtMaxTest == 60
+    check defaults.fmtMaxValue == 400
+    writeFile(tmpRoot / "checkmate.toml",
+      "[format]\nmax_path = 0\nmax_suite = 30\nmax_value = 1000\n")
+    let cfg = loadConfig(tmpRoot)
+    check cfg.fmtMaxPath == 0        # 0 = unlimited
+    check cfg.fmtMaxSuite == 30
+    check cfg.fmtMaxTest == 60       # untouched key keeps default
+    check cfg.fmtMaxValue == 1000
+    writeFile(tmpRoot / "checkmate.toml", "[format]\nmax_test = -1\n")
+    expect UsageError:
+      discard loadConfig(tmpRoot)
+
   test "invalid toml raises UsageError":
     writeFile(tmpRoot / "checkmate.toml", "[run]\nloop = \"three\"\n")
     expect UsageError:

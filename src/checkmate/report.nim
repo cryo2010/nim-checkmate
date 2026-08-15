@@ -10,10 +10,15 @@ type
     verbose*: bool
     filtered*: bool     # a -t filter is active: empty files are expected
     rootPrefix*: string # absolute project root + separator, stripped from output
+    maxPath*: int       # [format] display caps; 0 = unlimited
+    maxSuite*: int
+    maxTest*: int
 
 proc newReporter*(cfg: Config, filtered = false): Reporter =
   Reporter(colors: cfg.colorsEnabled, verbose: cfg.verbose, filtered: filtered,
-           rootPrefix: cfg.projectRoot & $DirSep)
+           rootPrefix: cfg.projectRoot & $DirSep,
+           maxPath: cfg.fmtMaxPath, maxSuite: cfg.fmtMaxSuite,
+           maxTest: cfg.fmtMaxTest)
 
 proc relativize(r: Reporter, s: string): string =
   ## Nim embeds absolute source paths in check messages, stack traces, and
@@ -59,18 +64,22 @@ proc median(xs: seq[float]): float =
 proc testTitle(t: TestOutcome): string =
   if t.suite.len > 0: t.suite & " > " & t.name else: t.name
 
-const maxDisplayPath = 44
-
-proc shortenPath(path: string): string =
+proc shortenPath(path: string, cap: int): string =
   ## Long paths keep their tail (the significant part), preceded by "...",
   ## cut at a component boundary when one falls inside the kept range.
-  if path.len <= maxDisplayPath:
+  if cap <= 0 or path.len <= cap:
     return path
-  var tail = path[path.len - (maxDisplayPath - 3) .. ^1]
+  var tail = path[path.len - max(cap - 3, 1) .. ^1]
   let slash = tail.find('/')
   if slash >= 0 and slash < tail.len - 1:
     tail = tail[slash + 1 .. ^1]
   "..." & tail
+
+proc shortenName(name: string, cap: int): string =
+  ## Long suite/test names keep their head, followed by "...".
+  if cap <= 0 or name.len <= cap:
+    return name
+  name[0 ..< max(cap - 3, 1)] & "..."
 
 # --- per-file result line (streamed in completion order) ------------------
 
@@ -87,7 +96,7 @@ proc fileLine*(r: Reporter, fo: FileOutcome) =
     var durs: seq[float]
     for run in fo.runs: durs.add run.durMs
     note = r.dim("(" & fmtSecs(median(durs)) & ")")
-  echo r.badge(fs), " ", shortenPath(fo.tf.relPath), " ", note
+  echo r.badge(fs), " ", shortenPath(fo.tf.relPath, r.maxPath), " ", note
   if r.verbose and fs in {fsPass, fsFail, fsFlaky}:
     for t in aggregateTests(fo):
       let n = t.passes + t.fails + t.skips
@@ -96,7 +105,10 @@ proc fileLine*(r: Reporter, fo: FileOutcome) =
         elif t.fails > 0: r.red("x")
         elif t.skips == n: r.dim("-")
         else: r.green("+")
-      var line = "  " & mark & " " & testTitle(t)
+      var title = shortenName(t.name, r.maxTest)
+      if t.suite.len > 0:
+        title = shortenName(t.suite, r.maxSuite) & " > " & title
+      var line = "  " & mark & " " & title
       if t.durationsMs.len > 0: line.add " " & r.dim("(" & fmtMs(median(t.durationsMs)) & ")")
       if t.fails > 0 and t.passes > 0:
         line.add " " & r.yellow("[flaky: passed " & $t.passes & "/" & $n & "]")
@@ -110,7 +122,7 @@ proc indented(text: string, prefix: string): string =
     lines.add prefix & line
   lines.join("\n")
 
-proc headerRewrite(cp, relPath: string): (bool, string) =
+proc headerRewrite(cp, relPath: string, pathCap: int): (bool, string) =
   ## "path(line, col): [Check failed: ]expr" becomes "line:  expr" when
   ## path is the file already named in the FAIL header, and
   ## "path:line  expr" when the check failed in another module (helper
@@ -143,7 +155,7 @@ proc headerRewrite(cp, relPath: string): (bool, string) =
   if path == relPath:
     (true, lineNum & ":  " & rest)
   else:
-    (true, shortenPath(path) & ":" & lineNum & "  " & rest)
+    (true, shortenPath(path, pathCap) & ":" & lineNum & "  " & rest)
 
 proc capturedOutputBlock(r: Reporter, fo: FileOutcome) =
   for run in fo.runs:
@@ -158,7 +170,7 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
   let fs = fileStatus(fo)
   if fs notin {fsFail, fsFlaky, fsCompileFail}: return
   echo ""
-  echo r.badge(fs), " ", r.bold(shortenPath(fo.tf.relPath))
+  echo r.badge(fs), " ", r.bold(shortenPath(fo.tf.relPath, r.maxPath))
   if fs == fsCompileFail:
     let content = if fileExists(fo.compileLog): readFile(fo.compileLog) else: ""
     echo indented(r.relativize(content.strip(leading = false)), "  ")
@@ -169,7 +181,7 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     if t.suite != currentSuite:
       currentSuite = t.suite
       if t.suite.len > 0:
-        echo "  ", r.red("●"), " ", r.bold(t.suite)
+        echo "  ", r.red("●"), " ", r.bold(shortenName(t.suite, r.maxSuite))
     # tests inside a suite nest under its heading; standalone tests keep
     # the flat layout
     let base = if t.suite.len > 0: "    " else: "  "
@@ -181,11 +193,11 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     of "TIMEOUT": suffix = " " & r.red("(timed out)")
     else:
       if t.passes > 0: suffix = " " & r.yellow("(flaky: failed " & $t.fails & "/" & $n & ")")
-    echo base, r.red(t.name), suffix
+    echo base, r.red(shortenName(t.name, r.maxTest)), suffix
     let f = t.failures[0]
     for cp in f.checkpoints:
       let rcp = r.relativize(cp)
-      let (isHeader, formatted) = headerRewrite(rcp, fo.tf.relPath)
+      let (isHeader, formatted) = headerRewrite(rcp, fo.tf.relPath, r.maxPath)
       if isHeader:
         echo indented(formatted, cpIndent)
       else:

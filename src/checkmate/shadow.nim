@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 10
+const OverlayVersion = 11
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -116,14 +116,33 @@ const unittestPatches: seq[(string, string)] = @[
 const checkmateEmptyTestGuard* = true
 var checkmateAssertions* {.threadvar.}: int
 
+import std/envvars as checkmateEnvvars
+
+var checkmateMaxValueCache = -1
+
+proc checkmateMaxValueCap(): int =
+  ## Printed-value cap from CHECKMATE_MAX_VALUE ([format] max_value);
+  ## default 400, 0 disables truncation.
+  if checkmateMaxValueCache < 0:
+    checkmateMaxValueCache = 400
+    let v = checkmateEnvvars.getEnv("CHECKMATE_MAX_VALUE")
+    if v.len > 0 and v.len <= 9:
+      var n = 0
+      var valid = true
+      for c in v:
+        if c in {'0' .. '9'}: n = n * 10 + ord(c) - ord('0')
+        else: valid = false
+      if valid: checkmateMaxValueCache = n
+  checkmateMaxValueCache
+
 proc checkmateTrim*(s: string): string =
   ## Bounds printed operand values so a failing comparison of huge strings
   ## cannot flood the report; also drops trailing newlines from repr output.
   var t = s
   while t.len > 0 and t[^1] in {'\n', '\r'}:
     t.setLen(t.len - 1)
-  const cap = 400
-  if t.len <= cap: t
+  let cap = checkmateMaxValueCap()
+  if cap <= 0 or t.len <= cap: t
   else: t[0 ..< cap] & " ... (" & $(t.len - cap) & " more chars)"
 
 proc checkmateVisible(c: char): string =

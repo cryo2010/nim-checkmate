@@ -121,7 +121,8 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
       removeFile(evPath)
       var cmd = quoteShell(ctasks[fi].binPath)
       if filterStr.len > 0: cmd.add " " & filterStr
-      var env = @[("CHECKMATE_EVENTS_FILE", evPath)]
+      var env = @[("CHECKMATE_EVENTS_FILE", evPath),
+                  ("CHECKMATE_MAX_VALUE", $cfg.fmtMaxValue)]
       if inProcessLoop:
         env.add ("CHECKMATE_LOOP", $cfg.loop)
       if timeTravelActive:

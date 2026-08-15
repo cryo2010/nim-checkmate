@@ -1,1 +1,6 @@
-# anchors this fixture root
+# anchors this fixture root. Path cap stays at the default 44; name and
+# value caps are tightened to demonstrate configurability.
+[format]
+max_suite = 30
+max_test = 30
+max_value = 30

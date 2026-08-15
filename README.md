@@ -111,6 +111,12 @@ paths = []                # extra --path entries
 color = "auto"
 verbose = false
 
+[format]
+max_path = 44             # rendered file paths, preceding ellipsis (0 = unlimited)
+max_suite = 60            # suite names, trailing ellipsis
+max_test = 60             # test names, trailing ellipsis
+max_value = 400           # printed values in check failures
+
 [coverage]
 enabled = false
 min_lines = 0             # gate: min percent (80.0) or max uncovered lines (-50)
