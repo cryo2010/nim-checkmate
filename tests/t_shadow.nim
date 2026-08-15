@@ -28,6 +28,7 @@ suite "patchUnittest":
     check "checkmateTrim" in patched  # repr-fallback/truncation print patch
     check "checkmateExplainDiff" in patched  # ==-aware diff injection
     check "checkmatePowerCheck" in patched   # and/or/not power-assert
+    check "checkmateRecordEqResult" in patched  # diff windows in power path
 
   test "rejects unknown layout":
     check patchUnittest("template test*(name: string) = discard").len == 0

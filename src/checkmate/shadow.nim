@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 9
+const OverlayVersion = 10
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -145,10 +145,11 @@ proc checkmateWindow(s: string, i: int): string =
     result.add checkmateVisible(s[p])
   if hi < s.len: result.add "..."
 
-proc checkmateExplainDiff*(a, b: string) =
+proc checkmateDiffLines*(a, b: string): seq[string] =
   ## Comparison-aware context for failing string equality: first differing
   ## index plus windows around it (long strings only; short values are
-  ## already printed in full).
+  ## already printed in full). Line-based so both the plain and the
+  ## power-assert paths can emit it.
   var i = 0
   while i < min(a.len, b.len) and a[i] == b[i]: inc i
   if i >= a.len and i >= b.len: return
@@ -164,9 +165,9 @@ proc checkmateExplainDiff*(a, b: string) =
     header.add ", " & $diffs & " differing position"
     if diffs != 1: header.add "s"
   header.add ")"
-  checkpoint(header)
-  checkpoint("  lhs: " & checkmateWindow(a, i))
-  checkpoint("  rhs: " & checkmateWindow(b, i))
+  result.add header
+  result.add "  lhs: " & checkmateWindow(a, i)
+  result.add "  rhs: " & checkmateWindow(b, i)
   # carets under every mismatching column inside the window; keep the
   # geometry in sync with checkmateWindow
   let lo = max(0, i - 15)
@@ -181,32 +182,36 @@ proc checkmateExplainDiff*(a, b: string) =
   while caretLine.len > 0 and caretLine[^1] == ' ':
     caretLine.setLen(caretLine.len - 1)
   if caretLine.len > 0 and caretLine[^1] == '^':
-    checkpoint(caretLine)
+    result.add caretLine
 
-proc checkmateExplainDiffSeq[T](a, b: openArray[T]) =
+proc checkmateDiffLinesSeq[T](a, b: openArray[T]): seq[string] =
   var i = 0
   while i < min(a.len, b.len) and a[i] == b[i]: inc i
   if i >= a.len and i >= b.len: return
   if a.len != b.len:
-    checkpoint("lengths differ: " & $a.len & " vs " & $b.len)
+    result.add "lengths differ: " & $a.len & " vs " & $b.len
   if i < min(a.len, b.len):
     when compiles($a[i]):
-      checkpoint("first mismatch at index " & $i & ": " &
-                 checkmateTrim($a[i]) & " vs " & checkmateTrim($b[i]))
+      result.add "first mismatch at index " & $i & ": " &
+                 checkmateTrim($a[i]) & " vs " & checkmateTrim($b[i])
     elif compiles(checkmateTrim(repr(a[i]))):
-      checkpoint("first mismatch at index " & $i & ": " &
-                 checkmateTrim(repr(a[i])) & " vs " & checkmateTrim(repr(b[i])))
+      result.add "first mismatch at index " & $i & ": " &
+                 checkmateTrim(repr(a[i])) & " vs " & checkmateTrim(repr(b[i]))
     else:
-      checkpoint("first mismatch at index " & $i)
+      result.add "first mismatch at index " & $i
 
-proc checkmateExplainDiff*[T](a, b: seq[T]) =
-  checkmateExplainDiffSeq(a, b)
+proc checkmateDiffLines*[T](a, b: seq[T]): seq[string] =
+  checkmateDiffLinesSeq(a, b)
 
-proc checkmateExplainDiff*[I; T](a, b: array[I, T]) =
-  checkmateExplainDiffSeq(a, b)
+proc checkmateDiffLines*[I; T](a, b: array[I, T]): seq[string] =
+  checkmateDiffLinesSeq(a, b)
 
-proc checkmateExplainDiff*[A; B](a: A, b: B) {.inline.} =
+proc checkmateDiffLines*[A; B](a: A, b: B): seq[string] =
   discard  # no extra context for other types
+
+proc checkmateExplainDiff*[A; B](a: A, b: B) =
+  for checkmateLine in checkmateDiffLines(a, b):
+    checkpoint(checkmateLine)
 
 macro checkmateOrigCheck*(conditions: untyped): untyped ="""),
   # inject the diff explainer into the printouts of failing == checks
@@ -288,6 +293,16 @@ proc checkmateRecordVal*[T](val: T, exprText: string): T =
     checkmateRecords.add((exprText, "<unprintable>"))
   val
 
+proc checkmateRecordEqResult*[A; B](a: A, b: B, cmpTxt: string): bool =
+  ## Records an == comparison's result and, on mismatch, defers the Tier 2
+  ## diff lines into the record stream (text "" marks a raw line). Deferral
+  ## matters: a failing == inside a passing `or` chain must stay silent.
+  result = a == b
+  checkmateRecords.add((cmpTxt, $result))
+  if not result:
+    for checkmateLine in checkmateDiffLines(a, b):
+      checkmateRecords.add(("", checkmateLine))
+
 const checkmateCmpOps = ["==", "!=", "<", "<=", ">", ">=", "in", "notin",
                          "is", "isnot"]
 
@@ -327,9 +342,13 @@ proc checkmateInstrument(n: NimNode, texts: var seq[string]): NimNode =
       op1 = checkmateWrapVal(op1, texts)
     if $n[0] notin ["is", "isnot"] and not checkmateSkipOperand(op2):
       op2 = checkmateWrapVal(op2, texts)
-    let cmpNode = newTree(nnkInfix, n[0], op1, op2)
     texts.add origTxt
-    newCall(bindSym"checkmateRecordVal", cmpNode, newLit(origTxt))
+    if $n[0] == "==":
+      # dedicated recorder captures BOTH typed operands for diff windows
+      newCall(bindSym"checkmateRecordEqResult", op1, op2, newLit(origTxt))
+    else:
+      let cmpNode = newTree(nnkInfix, n[0], op1, op2)
+      newCall(bindSym"checkmateRecordVal", cmpNode, newLit(origTxt))
   else:
     checkmateWrapVal(n, texts)
 
@@ -350,8 +369,11 @@ macro checkmatePowerCheck*(cond: untyped, lineTxt: static string): untyped =
         var checkmatePrinted: seq[(string, string)]
         for checkmateK in checkmateRecStart ..< checkmateRecords.len:
           if checkmateRecords[checkmateK] notin checkmatePrinted:
-            checkpoint(checkmateRecords[checkmateK][0] & " was " &
-                       checkmateRecords[checkmateK][1])
+            if checkmateRecords[checkmateK][0].len == 0:
+              checkpoint(checkmateRecords[checkmateK][1])  # raw diff line
+            else:
+              checkpoint(checkmateRecords[checkmateK][0] & " was " &
+                         checkmateRecords[checkmateK][1])
             checkmatePrinted.add checkmateRecords[checkmateK]
         for checkmateTxt in `textsLit`:
           var checkmateFound = false

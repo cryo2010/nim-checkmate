@@ -241,6 +241,10 @@ suite "power assert":
     check "code == 200 was false" in output
     check "code == 204 was false" in output                # or: all attempted
     check "tests/t_power.nim(14" in output                 # user-file lineinfo
+    # Tier 2 diff windows compose with power-assert
+    check "strings differ at index 100 (lengths 225 and 225, 1 differing position)" in output
+    check "quick Qrown" in output
+    check "first mismatch at index 2: 4 vs 3" in output
 
 suite "time travel":
   test "virtual sleeps finish in real milliseconds":

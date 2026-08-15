@@ -24,3 +24,16 @@ test "or chain shows every attempted alternative":
 test "not shows the operand value":
   let shuttingDown = true
   check not (shuttingDown == false) and false
+
+test "string diff windows appear inside boolean chains":
+  var expected = ""
+  for _ in 1 .. 5:
+    expected.add "the quick brown fox jumps over the lazy dog. "
+  var actual = expected
+  actual[100] = 'Q'
+  check actual == expected and true
+
+test "seq diffs appear inside boolean chains":
+  let want = @[1, 2, 3]
+  let got = @[1, 2, 4]
+  check got == want or false
