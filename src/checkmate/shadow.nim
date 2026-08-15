@@ -1,25 +1,115 @@
-## Empty-test enforcement via a stdlib overlay.
+## Stdlib overlay farm: empty-test enforcement and time travel.
 ##
-## Passing checks are invisible to OutputFormatters, so counting assertions
-## requires intercepting the unittest module itself. `--lib` pointed at a
-## symlink farm (real toolchain lib dir mirrored 1:1, with pure/unittest.nim
-## replaced) intercepts BOTH `import unittest` and `import std/unittest`,
-## which plain --path shadowing cannot.
+## Passing checks are invisible to OutputFormatters and clocks cannot be
+## virtualized from outside, so both features intercept stdlib modules at
+## compile time. `--lib` pointed at a symlink farm (real toolchain lib dir
+## mirrored 1:1, with a handful of files replaced) intercepts BOTH
+## `import unittest` and `import std/unittest` forms, which plain --path
+## shadowing cannot.
 ##
-## The overlay is NOT a vendored fork: it is a copy of the user's own
-## toolchain unittest.nim with a handful of anchored textual patches (rename
-## check/test/expect to checkmateOrig*, count inside require) plus an
-## appended wrapper block that counts check/require/expect executions in a
-## threadvar and fails a still-OK test whose counter did not move. Each
-## anchor must match exactly once; otherwise the feature auto-disables with
-## a warning and compilation stays fully stock (no --lib at all).
+## Overlays are NOT vendored forks: each is a copy of the user's own
+## toolchain source with anchored textual patches plus appended wrappers.
+## Every anchor must match exactly once; otherwise the affected feature
+## auto-disables with a warning. unittest patch failure kills the whole
+## farm; any time-patch failure drops ALL time overlays (all-or-nothing,
+## preventing a farm where a frozen monotonic clock hangs asyncdispatch).
+##
+## Virtualization is runtime-gated by env vars (CHECKMATE_TIME_TRAVEL,
+## CHECKMATE_ALLOW_EMPTY, CHECKMATE_LOOP), so toggling features never
+## changes compile commands or thrashes nimcaches.
 
-import std/[json, os, osproc, strutils]
+import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 2
+const OverlayVersion = 3
 
-const anchorPatches: seq[(string, string)] = @[
+# --- generated module: the shared virtual clock core ----------------------
+# Importable as `import checkmate_timebase` by overlay modules and by user
+# helper modules wanting the raw API. Frozen model: no syscalls at all, so
+# no import cycles are possible (only std/envvars + std/sysatomics).
+
+const timebaseSource* = """# checkmate: generated time-travel core (overlay farm). Not part of stdlib.
+const checkmateTimeTravel* = true
+
+when defined(js) or defined(nimscript):
+  proc checkmateTimeTravelEnabled*(): bool = false
+  proc timeTravelActive*(): bool = false
+  proc advanceTime*(ms: int) = discard
+  proc checkmateAdvanceNanos*(ns: int64) = discard
+  proc checkmateAdvanceMonoToTicks*(target: int64) = discard
+  proc checkmateTravelToWallNs*(target: int64) = discard
+  proc checkmateVirtualMonoTicks*(): int64 = 0
+  proc checkmateVirtualWallNs*(): int64 = 0
+else:
+  import std/envvars
+
+  const checkmateDefaultWallNs = 946_684_800'i64 * 1_000_000_000'i64  # 2000-01-01Z
+  const checkmateBaseMonoTicks = 1_000_000_000_000'i64                # 1000 s, arbitrary
+
+  proc checkmateParseNs(s: string): int64 =
+    if s.len == 0 or s.len > 19: return -1
+    for c in s:
+      if c < '0' or c > '9': return -1
+      result = result * 10 + int64(ord(c) - ord('0'))
+
+  let checkmateTtEnabled = getEnv("CHECKMATE_TIME_TRAVEL") == "1"
+  let checkmateBaseWallNs = block:
+    let parsed = checkmateParseNs(getEnv("CHECKMATE_TIME_START_NS"))
+    if parsed >= 0: parsed else: checkmateDefaultWallNs
+
+  var checkmateMonoOffsetNs: int64   # sleep/advanceTime/async; only grows
+  var checkmateWallSkewNs: int64     # travelTo; wall-only jumps, may be negative
+
+  when not declared(atomicAddFetch):
+    import std/sysatomics
+
+  proc checkmateTimeTravelEnabled*(): bool {.inline.} = checkmateTtEnabled
+  proc timeTravelActive*(): bool {.inline.} = checkmateTtEnabled
+
+  proc checkmateLoadMonoOffset(): int64 {.inline.} =
+    atomicLoadN(addr checkmateMonoOffsetNs, ATOMIC_SEQ_CST)
+
+  proc checkmateVirtualMonoTicks*(): int64 {.inline.} =
+    checkmateBaseMonoTicks + checkmateLoadMonoOffset()
+
+  proc checkmateVirtualWallNs*(): int64 {.inline.} =
+    checkmateBaseWallNs + checkmateLoadMonoOffset() +
+      atomicLoadN(addr checkmateWallSkewNs, ATOMIC_SEQ_CST)
+
+  proc checkmateAdvanceNanos*(ns: int64) =
+    if ns > 0:
+      discard atomicAddFetch(addr checkmateMonoOffsetNs, ns, ATOMIC_SEQ_CST)
+
+  proc advanceTime*(ms: int) =
+    ## Advances the virtual clock by ms milliseconds (all clocks).
+    checkmateAdvanceNanos(int64(ms) * 1_000_000)
+
+  proc checkmateAdvanceMonoToTicks*(target: int64) =
+    let cur = checkmateVirtualMonoTicks()
+    if target > cur:
+      checkmateAdvanceNanos(target - cur)
+
+  proc checkmateTravelToWallNs*(target: int64) =
+    let skew = target - (checkmateBaseWallNs + checkmateLoadMonoOffset())
+    atomicStoreN(addr checkmateWallSkewNs, skew, ATOMIC_SEQ_CST)
+"""
+
+# --- generic anchored patcher ---------------------------------------------
+
+proc applyAnchorPatches(source: string,
+                        patches: openArray[(string, string)],
+                        tail = ""): string =
+  ## "" if any anchor does not occur exactly once (unknown stdlib layout).
+  result = source
+  for (anchor, replacement) in patches:
+    if result.count(anchor) != 1:
+      return ""
+    result = result.replace(anchor, replacement)
+  result.add tail
+
+# --- pure/unittest.nim ----------------------------------------------------
+
+const unittestPatches: seq[(string, string)] = @[
   # 1: declare the counter before every later reference, rename check
   ("macro check*(conditions: untyped): untyped =",
    """# --- checkmate: empty-test enforcement (generated overlay, part 1) --------
@@ -48,12 +138,25 @@ macro checkmateOrigCheck*(conditions: untyped): untyped ="""),
   abortOnError = savedAbortOnError"""),
 ]
 
-const wrapperBlock = """
+const unittestTail = """
 
 # --- checkmate: generated overlay, part 2 ---------------------------------
 
 import std/os as checkmateOs
 from std/strutils as checkmateStrutils import parseInt
+import checkmate_timebase
+export checkmate_timebase
+
+proc advanceTime*(d: Duration) =
+  ## Advances the virtual clock (monotonic and wall) by `d`.
+  checkmateAdvanceNanos(d.inNanoseconds)
+
+proc travelTo*(t: Time) =
+  ## Jumps the virtual wall clock to `t`; the monotonic clock is unaffected.
+  checkmateTravelToWallNs(t.toUnix() * 1_000_000_000'i64 + t.nanosecond)
+
+proc travelTo*(dt: DateTime) =
+  travelTo(dt.toTime())
 
 template check*(conditions: untyped): untyped =
   inc checkmateAssertions
@@ -82,6 +185,17 @@ proc checkmateLoopCount*(): int =
         discard
   checkmateLoopNCache
 
+var checkmateAllowEmptyCache = -1
+
+proc checkmateAllowEmpty*(): bool =
+  ## Runtime opt-out of empty-test enforcement (CHECKMATE_ALLOW_EMPTY=1),
+  ## set by checkmate when allow_empty_tests is on but the farm is needed
+  ## anyway (e.g. for time travel).
+  if checkmateAllowEmptyCache < 0:
+    checkmateAllowEmptyCache =
+      if checkmateOs.getEnv("CHECKMATE_ALLOW_EMPTY") == "1": 1 else: 0
+  checkmateAllowEmptyCache == 1
+
 template test*(name, body) {.dirty.} =
   # the loop wraps the ORIGINAL test template, so suite setup/teardown and
   # testStarted/testEnded events all fire once per iteration
@@ -90,10 +204,239 @@ template test*(name, body) {.dirty.} =
       let checkmateAssertionsBefore {.used.} = checkmateAssertions
       body
       if checkmateAssertions == checkmateAssertionsBefore and
-          testStatusIMPL == TestStatus.OK:
+          testStatusIMPL == TestStatus.OK and not checkmateAllowEmpty():
         checkpoint("Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)")
         fail()
 """
+
+proc patchUnittest*(source: string): string =
+  applyAnchorPatches(source, unittestPatches, unittestTail)
+
+# --- pure/times.nim -------------------------------------------------------
+
+const timesPatches: seq[(string, string)] = @[
+  ("import std/[strutils, math, options]",
+   """import std/[strutils, math, options]
+when not (defined(js) or defined(nimscript)):
+  import checkmate_timebase"""),
+  ("proc getTime*(): Time {.tags: [TimeEffect], gcsafe.} =",
+   "proc checkmateOrigGetTime*(): Time {.tags: [TimeEffect], gcsafe.} ="),
+  # the getTime wrapper must be declared BEFORE now() (which calls it), so
+  # it is inserted here rather than appended
+  ("proc now*(): DateTime {.tags: [TimeEffect], gcsafe.} =",
+   """proc getTime*(): Time {.tags: [TimeEffect], gcsafe.} =
+  ## Gets the current time (virtual under checkmate time travel).
+  when nimvm:
+    checkmateOrigGetTime()
+  else:
+    when defined(js) or defined(nimscript):
+      checkmateOrigGetTime()
+    else:
+      if checkmateTimeTravelEnabled():
+        let ns = checkmateVirtualWallNs()
+        initTime(floorDiv(ns, 1_000_000_000'i64),
+                 floorMod(ns, 1_000_000_000'i64).NanosecondRange)
+      else:
+        checkmateOrigGetTime()
+
+proc now*(): DateTime {.tags: [TimeEffect], gcsafe.} ="""),
+  ("proc epochTime*(): float {.tags: [TimeEffect].} =",
+   "proc checkmateOrigEpochTime*(): float {.tags: [TimeEffect].} ="),
+]
+
+const timesTail = """
+
+# --- checkmate: time-travel overlay (generated) ---------------------------
+proc epochTime*(): float {.tags: [TimeEffect].} =
+  ## Unix epoch seconds (virtual under checkmate time travel).
+  when defined(js) or defined(nimscript):
+    checkmateOrigEpochTime()
+  else:
+    if checkmateTimeTravelEnabled():
+      checkmateVirtualWallNs().float / 1e9
+    else:
+      checkmateOrigEpochTime()
+"""
+
+proc patchTimes*(source: string): string =
+  applyAnchorPatches(source, timesPatches, timesTail)
+
+# --- std/monotimes.nim ----------------------------------------------------
+
+const monotimesPatches: seq[(string, string)] = @[
+  # exported rename: also the inject formatter's real-clock escape hatch
+  ("proc getMonoTime*(): MonoTime {.tags: [TimeEffect].} =",
+   "proc checkmateOrigGetMonoTime*(): MonoTime {.tags: [TimeEffect].} ="),
+]
+
+const monotimesTail = """
+
+# --- checkmate: time-travel overlay (generated) ---------------------------
+when not (defined(js) or defined(nimscript)):
+  import checkmate_timebase
+  proc getMonoTime*(): MonoTime {.tags: [TimeEffect].} =
+    ## Monotonic timestamp (virtual under checkmate time travel).
+    if checkmateTimeTravelEnabled():
+      MonoTime(ticks: checkmateVirtualMonoTicks())
+    else:
+      checkmateOrigGetMonoTime()
+else:
+  proc getMonoTime*(): MonoTime {.tags: [TimeEffect].} =
+    checkmateOrigGetMonoTime()
+"""
+
+proc patchMonotimes*(source: string): string =
+  applyAnchorPatches(source, monotimesPatches, monotimesTail)
+
+# --- pure/os.nim ----------------------------------------------------------
+
+const osPatches: seq[(string, string)] = @[
+  # the whole sleep proc (sits inside `when not weirdTarget:`, 2-space indent)
+  ("""  proc sleep*(milsecs: int) {.rtl, extern: "nos$1", tags: [TimeEffect], noWeirdTarget.} =
+    ## Sleeps `milsecs` milliseconds.
+    ## A negative `milsecs` causes sleep to return immediately.
+    when defined(windows):
+      if milsecs < 0:
+        return  # fixes #23732
+      winlean.sleep(int32(milsecs))
+    else:
+      var a, b: Timespec = default(Timespec)
+      a.tv_sec = posix.Time(milsecs div 1000)
+      a.tv_nsec = (milsecs mod 1000) * 1000 * 1000
+      discard posix.nanosleep(a, b)""",
+   """  import checkmate_timebase
+
+  proc checkmateOrigSleep*(milsecs: int) {.tags: [TimeEffect], noWeirdTarget.} =
+    ## Sleeps `milsecs` milliseconds (real clock, checkmate escape hatch).
+    ## A negative `milsecs` causes sleep to return immediately.
+    when defined(windows):
+      if milsecs < 0:
+        return  # fixes #23732
+      winlean.sleep(int32(milsecs))
+    else:
+      var a, b: Timespec = default(Timespec)
+      a.tv_sec = posix.Time(milsecs div 1000)
+      a.tv_nsec = (milsecs mod 1000) * 1000 * 1000
+      discard posix.nanosleep(a, b)
+
+  proc sleep*(milsecs: int) {.rtl, extern: "nos$1", tags: [TimeEffect], noWeirdTarget.} =
+    ## Sleeps `milsecs` milliseconds (virtual under checkmate time travel).
+    if checkmateTimeTravelEnabled():
+      if milsecs > 0:
+        checkmateAdvanceNanos(int64(milsecs) * 1_000_000)
+    else:
+      checkmateOrigSleep(milsecs)"""),
+]
+
+proc patchOs*(source: string): string =
+  applyAnchorPatches(source, osPatches)
+
+# --- pure/asyncdispatch.nim -----------------------------------------------
+# Conservative auto-advance: jump the virtual clock to the next timer only
+# when nothing else is pending, so sleepAsync completes instantly but a
+# timeout racing real I/O never fires eagerly (the checkmate real-time
+# watchdog backstops the never-expires case).
+
+const asyncdispatchPatches: seq[(string, string)] = @[
+  ("import std/[math, monotimes]",
+   "import std/[math, monotimes]\nimport checkmate_timebase"),
+  # posix runOnce
+  ("""    result = false
+    var keys: array[64, ReadyKey]
+    let nextTimer = processTimers(p, result)""",
+   """    result = false
+    if checkmateTimeTravelEnabled() and p.timers.len != 0 and
+        p.selector.isEmpty() and p.callbacks.len == 0:
+      checkmateAdvanceMonoToTicks(p.timers[0].finishAt.ticks)
+    var keys: array[64, ReadyKey]
+    let nextTimer = processTimers(p, result)"""),
+  # windows runOnce
+  ("""    result = false
+    let nextTimer = processTimers(p, result)
+    let at = adjustTimeout(p, timeout, nextTimer)""",
+   """    result = false
+    if checkmateTimeTravelEnabled() and p.timers.len != 0 and
+        p.handles.len == 0 and p.callbacks.len == 0:
+      checkmateAdvanceMonoToTicks(p.timers[0].finishAt.ticks)
+    let nextTimer = processTimers(p, result)
+    let at = adjustTimeout(p, timeout, nextTimer)"""),
+]
+
+proc patchAsyncdispatch*(source: string): string =
+  applyAnchorPatches(source, asyncdispatchPatches)
+
+# --- overlay assembly -----------------------------------------------------
+
+type OverlaySet* = object
+  unittestOk*: bool
+  timeOk*: bool
+  timeWarning*: string
+  overlays*: seq[(string, string)]  # (relPath with '/', content)
+
+proc buildOverlays*(libDir: string): OverlaySet =
+  let unittestPath = libDir / "pure" / "unittest.nim"
+  var unittestSrc: string
+  try:
+    unittestSrc = readFile(unittestPath)
+  except IOError:
+    return
+  let patchedUnittest = patchUnittest(unittestSrc)
+  if patchedUnittest.len == 0:
+    return
+  result.unittestOk = true
+  result.overlays.add ("pure/unittest.nim", patchedUnittest)
+
+  let timePatchers: array[4, tuple[rel: string,
+                                   fn: proc(s: string): string {.nimcall.}]] = [
+    ("pure/times.nim", patchTimes),
+    ("std/monotimes.nim", patchMonotimes),
+    ("pure/os.nim", patchOs),
+    ("pure/asyncdispatch.nim", patchAsyncdispatch),
+  ]
+  var timeOverlays: seq[(string, string)]
+  for (rel, fn) in timePatchers:
+    var src: string
+    try:
+      src = readFile(libDir / rel.replace("/", $DirSep))
+    except IOError:
+      result.timeWarning = "time travel unavailable: cannot read " & libDir / rel
+      return
+    let patched = fn(src)
+    if patched.len == 0:
+      result.timeWarning = "time travel unavailable: " & libDir / rel &
+        " does not match the expected layout"
+      return  # all-or-nothing: no time overlays at all
+    timeOverlays.add (rel, patched)
+  result.timeOk = true
+  result.overlays.add timeOverlays
+  result.overlays.add ("pure/checkmate_timebase.nim", timebaseSource)
+
+# --- farm building --------------------------------------------------------
+
+proc buildFarm*(libDir, farm: string, overlays: seq[(string, string)]) =
+  removeDir(farm)
+  var overridden = initTable[string, HashSet[string]]()  # top dir -> basenames
+  for (rel, _) in overlays:
+    let parts = rel.split('/', maxsplit = 1)
+    overridden.mgetOrPut(parts[0], initHashSet[string]()).incl parts[1]
+  createDir(farm)
+  for entry in walkDir(libDir):
+    let name = extractFilename(entry.path)
+    if overridden.hasKey(name):
+      createDir(farm / name)
+      for child in walkDir(entry.path):
+        let childName = extractFilename(child.path)
+        if childName notin overridden[name]:
+          createSymlink(child.path, farm / name / childName)
+    else:
+      createSymlink(entry.path, farm / name)
+  for (rel, content) in overlays:
+    let dest = farm / rel.replace("/", $DirSep)
+    # hard guard against ever writing an overlay through a symlink into the
+    # real toolchain (a farm-layout bug elsewhere must not become data loss)
+    if symlinkExists(dest):
+      removeFile(dest)
+    writeFile(dest, content)
 
 proc resolveNimLib*(cfg: Config): string =
   ## Toolchain lib dir via `nim dump`; honors the project's own nim config
@@ -112,58 +455,38 @@ proc resolveNimLib*(cfg: Config): string =
   except CatchableError:
     result = ""
 
-proc patchUnittest*(source: string): string =
-  ## Applies the anchored patches; "" if any anchor does not occur exactly
-  ## once (unknown unittest layout, e.g. a future Nim version).
-  result = source
-  for (anchor, replacement) in anchorPatches:
-    if result.count(anchor) != 1:
-      return ""
-    result = result.replace(anchor, replacement)
-  result.add wrapperBlock
-
-proc buildFarm(libDir, farm, overlay: string) =
-  removeDir(farm)
-  createDir(farm / "pure")
-  for entry in walkDir(libDir):
-    let name = extractFilename(entry.path)
-    if name != "pure":
-      createSymlink(entry.path, farm / name)
-  for entry in walkDir(libDir / "pure"):
-    let name = extractFilename(entry.path)
-    if name != "unittest.nim":
-      createSymlink(entry.path, farm / "pure" / name)
-  writeFile(farm / "pure" / "unittest.nim", overlay)
-
-proc prepareLibFarm*(cfg: Config): tuple[ok: bool, dir, warning: string] =
+proc prepareLibFarm*(cfg: Config):
+    tuple[ok, timeOk: bool; dir, warning, timeWarning: string] =
   const disabled = "empty-test enforcement disabled: "
   let libDir = resolveNimLib(cfg)
   if libDir.len == 0:
-    return (false, "", disabled & "could not resolve the nim lib dir via '" &
-            cfg.nimBin & " dump'")
-  let unittestPath = libDir / "pure" / "unittest.nim"
-  var source: string
-  try:
-    source = readFile(unittestPath)
-  except IOError:
-    return (false, "", disabled & "cannot read " & unittestPath)
-  let overlay = patchUnittest(source)
-  if overlay.len == 0:
-    return (false, "", disabled & unittestPath &
-            " does not match the expected layout; set allow_empty_tests = true to silence")
+    result.warning = disabled & "could not resolve the nim lib dir via '" &
+      cfg.nimBin & " dump'"
+    return
+  let ovs = buildOverlays(libDir)
+  if not ovs.unittestOk:
+    result.warning = disabled & libDir / "pure" / "unittest.nim" &
+      " does not match the expected layout; set allow_empty_tests = true to silence"
+    return
+  result.timeOk = ovs.timeOk
+  result.timeWarning = ovs.timeWarning
   result.dir = cfg.cacheDir / "libfarm"
   let stampPath = cfg.cacheDir / "libfarm.stamp"
-  let stamp = libDir & "\n" & $OverlayVersion
-  let overlayPath = result.dir / "pure" / "unittest.nim"
-  # rebuild only when stale; stable overlay mtime keeps nimcaches valid
-  let fresh =
-    fileExists(stampPath) and readFile(stampPath) == stamp and
-    fileExists(overlayPath) and readFile(overlayPath) == overlay
+  let stamp = libDir & "\n" & $OverlayVersion & "\ntime=" & $ovs.timeOk
+  # rebuild only when stale; stable overlay mtimes keep nimcaches valid
+  var fresh = fileExists(stampPath) and readFile(stampPath) == stamp
+  if fresh:
+    for (rel, content) in ovs.overlays:
+      let path = result.dir / rel.replace("/", $DirSep)
+      if not fileExists(path) or readFile(path) != content:
+        fresh = false
+        break
   if not fresh:
     try:
       createDir(cfg.cacheDir)
-      buildFarm(libDir, result.dir, overlay)
+      buildFarm(libDir, result.dir, ovs.overlays)
       writeFile(stampPath, stamp)
     except OSError as e:
-      return (false, "", disabled & "cannot build lib overlay: " & e.msg)
+      return (false, false, "", disabled & "cannot build lib overlay: " & e.msg,
+              result.timeWarning)
   result.ok = true
