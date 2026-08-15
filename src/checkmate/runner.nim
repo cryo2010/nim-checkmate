@@ -99,6 +99,10 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
     return
 
   # --- run phase ---
+  # stale event files from previous/aborted runs must never leak into this
+  # run's aggregation (the formatter appends): start from an empty dir
+  removeDir(cfg.cacheDir / "events")
+  createDir(cfg.cacheDir / "events")
   if cfg.covEnabled:
     covClean(cfg)
   var runnable: seq[int]
