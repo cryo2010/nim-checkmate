@@ -68,6 +68,23 @@ suite "foldEvents":
     check not o.crashed
     check o.tests[0].status == "TIMEOUT"
 
+  test "per-test timeout rewrites overlong completed tests":
+    let evs = @[
+      Event(kind: ekTestStarted, test: "slowpoke"),
+      Event(kind: ekTestEnded, test: "slowpoke", status: "OK", durMs: 2500),
+      Event(kind: ekTestStarted, test: "quick"),
+      Event(kind: ekTestEnded, test: "quick", status: "OK", durMs: 10),
+      Event(kind: ekTestStarted, test: "slowfail"),
+      Event(kind: ekTestEnded, test: "slowfail", status: "FAILED", durMs: 9000),
+    ]
+    let o = foldEvents(evs, 0, false, testTimeoutMs = 2000)
+    check o.tests[0].status == "TIMEOUT"
+    check "Test exceeded the timeout (2.5 s > 2.0 s)" in o.tests[0].checkpoints
+    check o.tests[1].status == "OK"
+    check o.tests[2].status == "FAILED"   # failures are not rewritten
+    # timeout of 0 disables the rewrite
+    check foldEvents(evs, 0, false).tests[0].status == "OK"
+
   test "no events + exit 0 = no tests":
     let o = foldEvents(@[], 0, false)
     check o.noTests

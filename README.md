@@ -52,7 +52,7 @@ checkmate list [paths...]              # print discovered test files
 | `--loop-in-process` | loop each test inside one process per file (fast, lower fidelity) |
 | `-j`, `--jobs N` | parallel workers (default: CPU cores) |
 | `-b`, `--bail` | stop on the first failing test file |
-| `--timeout SECS` | per-test-binary timeout (default 300; 0 disables) |
+| `--timeout SECS` | seconds a single test may run (default 300; 0 disables) |
 | `-v`, `--verbose` | per-test result lines |
 | `--color auto\|always\|never` | color mode (`NO_COLOR` and `CI` are honored) |
 | `-n`, `--nimflags FLAG` | extra flags for `nim c`; repeatable |
@@ -90,7 +90,7 @@ jobs = 0                  # 0 = CPU cores
 loop = 1
 loop_in_process = false   # loop inside one process per file (fast, lower fidelity)
 bail = false
-timeout = 300             # seconds per test binary; 0 disables
+timeout = 300             # seconds a single test may run; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
 
@@ -140,7 +140,8 @@ runs. A crash or timeout also ends all remaining iterations of that file,
 and the per-file timeout budget covers all N iterations. Use it for quick
 statistical sweeps; trust plain `--loop` for verdicts. Requires the
 unittest overlay (see Empty-test enforcement); when the overlay is
-unavailable it warns and falls back to process-level looping.
+unavailable it warns and falls back to process-level looping. The per-test
+timeout applies per iteration in both modes.
 
 ## Empty-test enforcement
 
@@ -221,6 +222,11 @@ second. Test-name filters are passed straight to unittest's own filtering.
   thread-local): a test asserting only in spawned threads needs a
   `check true` in its main body. Assertions in `teardown` blocks don't
   count either (they run after the per-test verdict).
+- **The timeout is per test, enforced from outside the process**: a hung
+  test is detected when the file's event stream stops progressing for
+  `timeout` seconds. Killing it necessarily kills the whole file's process,
+  so tests after the hung one are not run. A test that finishes but
+  exceeded the budget is failed post-hoc without affecting its siblings.
 - **Empty-test enforcement is baked in at compile time**, so binaries under
   `.checkmate/bin/` enforce it even when run standalone; a `--nimflags`
   `--lib:` override is shadowed by checkmate's own when enforcement is on.

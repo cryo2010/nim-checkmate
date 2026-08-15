@@ -15,6 +15,10 @@ type
                                   # test file, which owns its resources)
     env*: seq[(string, string)]   # extra env merged over the parent env
     timeoutSec*: int              # 0 = no timeout
+    watchFile*: string            # progress-based timeout: the deadline
+                                  # resets whenever this file grows (per-test
+                                  # semantics via the event stream); "" =
+                                  # timeout counts from process start
 
   PoolResult* = object
     id*: int
@@ -29,6 +33,8 @@ type
     taskIdx: int
     p: Process
     start: MonoTime
+    lastProgress: MonoTime  # start, or last growth of watchFile
+    lastSize: int64         # watchFile size at lastProgress (-1 = none yet)
     terminated: bool    # SIGTERM sent (timeout)
     killAt: MonoTime    # when to escalate to SIGKILL
     timedOut: bool
@@ -54,8 +60,9 @@ proc start(t: PoolTask): Live =
     for (k, v) in t.env:
       envTbl[k] = v
   let (exe, args) = shellWrap(t)
+  let now = getMonoTime()
   Live(p: startProcess(exe, args = args, env = envTbl, options = {poUsePath}),
-       start: getMonoTime())
+       start: now, lastProgress: now, lastSize: -1)
 
 proc reap(live: var seq[Live], killAll = false): seq[(int, PoolResult)] =
   ## Poll live processes; collect finished ones. With killAll, terminate
@@ -85,8 +92,16 @@ proc checkTimeouts(tasks: seq[PoolTask], live: var seq[Live]) =
   for l in live.mitems:
     let timeout = tasks[l.taskIdx].timeoutSec
     if timeout <= 0: continue
+    let watchFile = tasks[l.taskIdx].watchFile
+    if watchFile.len > 0:
+      let size =
+        try: getFileSize(watchFile)
+        except CatchableError: -1'i64
+      if size != l.lastSize:
+        l.lastSize = size
+        l.lastProgress = now
     if not l.terminated:
-      if now - l.start > initDuration(seconds = timeout):
+      if now - l.lastProgress > initDuration(seconds = timeout):
         l.timedOut = true
         l.terminated = true
         l.killAt = now + killGrace

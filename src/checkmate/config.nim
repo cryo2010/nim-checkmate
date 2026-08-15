@@ -19,7 +19,7 @@ type
     loop*: int
     loopInProcess*: bool  # loop inside one process per file (fast, lower fidelity)
     bail*: bool
-    timeoutSec*: int    # 0 disables
+    timeoutSec*: int    # per-test budget (progress-based); 0 disables
     passWithNoTests*: bool  # zero tests run is a pass instead of a failure
     allowEmptyTests*: bool  # don't fail tests that execute zero assertions
     # [compile]
@@ -236,7 +236,9 @@ loop = 1                  # run the whole suite N times (flake detection)
 loop_in_process = false   # loop each test inside one process per file:
                           # much faster, but iterations share process state
 bail = false              # stop on first failing test file
-timeout = 300             # seconds per test binary; 0 disables
+timeout = 300             # seconds a single test may run; hung or overlong
+                          # tests fail and their file's process is killed
+                          # (0 disables)
 pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
 

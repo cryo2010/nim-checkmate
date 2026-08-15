@@ -111,9 +111,13 @@ proc parseEvents*(path: string): seq[Event] =
       continue
     result.add ev
 
-proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool): FileRunOutcome =
+proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
+                 testTimeoutMs = 0.0): FileRunOutcome =
   ## Attribute failures to tests, detect crashes (testStarted without
-  ## testEnded + abnormal exit) and empty runs.
+  ## testEnded + abnormal exit) and empty runs. With testTimeoutMs > 0,
+  ## a test that COMPLETED but exceeded the per-test budget is rewritten
+  ## to TIMEOUT (hung tests are killed by the pool's progress watchdog
+  ## before they can complete; this catches the slow-but-finishing rest).
   var openTest = ""
   var openSuite = ""
   var pendingCheckpoints: seq[string]
@@ -142,6 +146,13 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool): FileRunOutc
       openTest = ""
       pendingCheckpoints = @[]
       pendingStack = ""
+  if testTimeoutMs > 0:
+    for t in result.tests.mitems:
+      if t.status == "OK" and t.durMs > testTimeoutMs:
+        t.status = "TIMEOUT"
+        t.checkpoints.add "Test exceeded the timeout (" &
+          formatFloat(t.durMs / 1000, ffDecimal, 1) & " s > " &
+          formatFloat(testTimeoutMs / 1000, ffDecimal, 1) & " s)"
   if openTest.len > 0 and (exitCode != 0 or timedOut):
     result.crashed = not timedOut
     result.crashedTest = openTest

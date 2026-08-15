@@ -92,9 +92,6 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   # in-process loop: one process per file, the overlay repeats each test
   # CHECKMATE_LOOP times; otherwise one process per (file, iteration)
   let itersPerFile = if inProcessLoop: 1 else: cfg.loop
-  var taskTimeout = cfg.timeoutSec
-  if inProcessLoop and taskTimeout > 0:
-    taskTimeout *= cfg.loop  # one timeout budget now covers all iterations
   var tasks: seq[PoolTask]
   var meta: seq[tuple[fi, iteration: int]]
   var evPaths: seq[string]
@@ -114,7 +111,10 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
         serialKey: files[fi].slug,  # a file's iterations never overlap: test
                                     # files own their resources exclusively
         env: env,
-        timeoutSec: taskTimeout)
+        # per-test budget: the watchdog deadline resets on every event the
+        # test binary emits, so it fires when ONE test stalls for timeoutSec
+        timeoutSec: cfg.timeoutSec,
+        watchFile: evPath)
       meta.add (fi: fi, iteration: iteration)
       evPaths.add evPath
 
@@ -124,7 +124,8 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   let (_, rbailed, _) = runPool(tasks, jobs,
     proc(t: PoolTask, r: PoolResult): PoolCtl =
       let (fi, iteration) = meta[t.id]
-      let outcome = foldEvents(parseEvents(evPaths[t.id]), r.exitCode, r.timedOut)
+      let outcome = foldEvents(parseEvents(evPaths[t.id]), r.exitCode, r.timedOut,
+                               testTimeoutMs = cfg.timeoutSec.float * 1000)
       if inProcessLoop:
         fos[fi].runs = splitInProcessRuns(
           outcome, loopN, r.exitCode, r.timedOut, r.durationMs, t.logPath)

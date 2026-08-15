@@ -77,7 +77,7 @@ when isMainModule:
       "loop": "run the suite N times to catch flaky tests",
       "jobs": "parallel workers (0 = CPU cores)",
       "bail": "stop on first failing test file",
-      "timeout": "seconds per test binary (0 disables)",
+      "timeout": "seconds a single test may run (0 disables)",
       "verbose": "per-test lines and captured output for passing files",
       "color": "auto|always|never",
       "nimflags": "extra flags passed to nim c",

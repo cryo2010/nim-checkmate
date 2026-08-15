@@ -80,7 +80,15 @@ suite "fixture runs":
   test "hanging test times out":
     let (output, code) = cm("hanging")
     check code == 1
+    check "never finishes" in output
     check "(timed out)" in output
+
+  test "timeout is per test, not per file":
+    # t_steady runs 4.5 s total against a 2 s timeout, but each test
+    # resets the progress watchdog, so the file passes
+    let (output, code) = cm("hanging", "tests/t_steady.nim")
+    check code == 0
+    check "3/3 passed" in output
 
   test "crash is attributed to the open test":
     let (output, code) = cm("crashing")
