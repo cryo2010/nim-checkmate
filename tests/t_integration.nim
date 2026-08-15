@@ -218,12 +218,12 @@ suite "check output enrichment":
     check "b was " in output
     check "... (1600 more chars)" in output
     check count(output, 'x') < 600        # 2000-char value was truncated
-    check "strings differ at index 100 (lengths 201 and 201)" in output
+    check "strings differ at index 100 (lengths 201 and 201, 1 differing position)" in output
     check "first mismatch at index 2: 3 vs 9" in output
     # divergence past the 400-char truncation window: only the diff shows it
-    check "strings differ at index 1500 (lengths 2000 and 2000)" in output
-    check "brownZfox" in output
-    check "^\n" in output   # caret line under the divergence column
+    check "strings differ at index 1500 (lengths 2000 and 2000, 2 differing positions)" in output
+    check "brownZfoxZjumps" in output
+    check "^   ^" in output   # carets under BOTH divergence columns
     check "lengths differ: 3 vs 5" in output
 
 suite "time travel":

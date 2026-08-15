@@ -31,6 +31,7 @@ test "difference beyond the truncation window":
   var expected = "the quick brown fox jumps over the lazy dog. ".repeat(45)[0 ..< 2000]
   var actual = expected
   actual[1500] = 'Z'
+  actual[1504] = 'Z'
   check actual == expected
 
 test "seqs of different lengths":

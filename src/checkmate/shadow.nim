@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 6
+const OverlayVersion = 7
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -141,20 +141,35 @@ proc checkmateExplainDiff*(a, b: string) =
   while i < min(a.len, b.len) and a[i] == b[i]: inc i
   if i >= a.len and i >= b.len: return
   if max(a.len, b.len) <= 40: return
-  checkpoint("strings differ at index " & $i &
-             " (lengths " & $a.len & " and " & $b.len & ")")
+  var header = "strings differ at index " & $i &
+               " (lengths " & $a.len & " and " & $b.len
+  if a.len == b.len:
+    # positional mismatch count is meaningful only without length drift
+    # (an insertion would positionally "differ" everywhere after it)
+    var diffs = 0
+    for p in 0 ..< a.len:
+      if a[p] != b[p]: inc diffs
+    header.add ", " & $diffs & " differing position"
+    if diffs != 1: header.add "s"
+  header.add ")"
+  checkpoint(header)
   checkpoint("  lhs: " & checkmateWindow(a, i))
   checkpoint("  rhs: " & checkmateWindow(b, i))
-  # caret under the divergence column; keep in sync with checkmateWindow
-  let checkmateCaretLo = max(0, i - 15)
-  var checkmateCaretCol = len("  rhs: ") + (i - checkmateCaretLo)
-  if checkmateCaretLo > 0:
-    checkmateCaretCol += 3  # the "..." prefix
-  var checkmateCaretLine = ""
-  for _ in 1 .. checkmateCaretCol:
-    checkmateCaretLine.add ' '
-  checkmateCaretLine.add '^'
-  checkpoint(checkmateCaretLine)
+  # carets under every mismatching column inside the window; keep the
+  # geometry in sync with checkmateWindow
+  let lo = max(0, i - 15)
+  let hiCommon = min(min(a.len, b.len), i + 25)
+  var caretLine = ""
+  for _ in 1 .. len("  rhs: ") + (if lo > 0: 3 else: 0):
+    caretLine.add ' '
+  for p in lo ..< hiCommon:
+    caretLine.add (if a[p] != b[p]: '^' else: ' ')
+  if a.len != b.len and min(a.len, b.len) < i + 25:
+    caretLine.add '^'  # divergence by length: one string ends here
+  while caretLine.len > 0 and caretLine[^1] == ' ':
+    caretLine.setLen(caretLine.len - 1)
+  if caretLine.len > 0 and caretLine[^1] == '^':
+    checkpoint(caretLine)
 
 proc checkmateExplainDiffSeq[T](a, b: openArray[T]) =
   var i = 0

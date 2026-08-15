@@ -180,11 +180,15 @@ mismatching index and elements:
 
 ```
 Check failed: lhs == rhs
-strings differ at index 100 (lengths 201 and 201)
+strings differ at index 100 (lengths 201 and 201, 1 differing position)
   lhs: ...aaaaaaaaaaaaaaaXaaaaaaaaaaaaaaaaaaaaaaaa...
   rhs: ...aaaaaaaaaaaaaaaYaaaaaaaaaaaaaaaaaaaaaaaa...
                         ^
 ```
+
+Every mismatching column inside the window gets its own caret, and for
+equal-length strings the header reports the total count of differing
+positions across the whole string.
 
 ## Time travel
 
