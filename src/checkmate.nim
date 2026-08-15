@@ -9,14 +9,23 @@ import checkmate/[config, coverage, discovery, events, runner, report]
 
 const checkmateVersion = "0.1.0"
 
+proc applyChdir(chdir: string) =
+  ## git/make-style -C: run as if started in this directory.
+  if chdir.len > 0:
+    if not dirExists(chdir):
+      raise newException(UsageError, "no such directory: " & chdir)
+    setCurrentDir(chdir)
+
 proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
            loop = 0; jobs = 0; bail = false; timeout = -1;
            verbose = false; color = ""; nimflags: seq[string] = @[];
            coverage = false; passWithNoTests = false;
            allowEmptyTests = false; minLines = 0.0;
-           loopInProcess = false; timeTravel = false; timeStart = ""): int =
+           loopInProcess = false; timeTravel = false; timeStart = "";
+           chdir = ""): int =
   ## Discover, compile, and run std/unittest test files.
   try:
+    applyChdir(chdir)
     var cfg = loadConfig(findProjectRoot(getCurrentDir()))
     cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
                  passWithNoTests, allowEmptyTests, minLines, loopInProcess,
@@ -48,9 +57,10 @@ proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
     stderr.writeLine "checkmate: " & e.msg
     result = 2
 
-proc cmInit(force = false): int =
+proc cmInit(force = false; chdir = ""): int =
   ## Generate a checkmate.toml with the default configuration.
   try:
+    applyChdir(chdir)
     let path = writeInitToml(getCurrentDir(), force)
     echo "created ", path
     echo "tip: add .checkmate/ to your .gitignore"
@@ -59,9 +69,10 @@ proc cmInit(force = false): int =
     stderr.writeLine "checkmate: " & e.msg
     2
 
-proc cmList(paths: seq[string] = @[]): int =
+proc cmList(paths: seq[string] = @[]; chdir = ""): int =
   ## Print discovered test files without compiling or running them.
   try:
+    applyChdir(chdir)
     let cfg = loadConfig(findProjectRoot(getCurrentDir()))
     for tf in discoverTests(cfg, paths):
       echo tf.relPath
@@ -74,8 +85,9 @@ when isMainModule:
   clCfg.version = checkmateVersion
   dispatchGen(cmRun, cmdName = "run", dispatchName = "dispatchRun",
     positional = "paths",
-    short = {"filter": 't'},
+    short = {"filter": 't', "chdir": 'C'},
     help = {
+      "chdir": "run as if started in this directory",
       "paths": "test files or directories (default: config [tests].dirs)",
       "filter": "run tests whose name starts or ends with PAT (or raw unittest glob / suite::test)",
       "loop": "run the suite N times to catch flaky tests",
@@ -94,10 +106,13 @@ when isMainModule:
       "timeStart": "pin the virtual start time (ISO 8601), e.g. 2020-06-15T12:00:00Z",
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
-    help = {"force": "overwrite an existing checkmate.toml"})
+    short = {"chdir": 'C'},
+    help = {"force": "overwrite an existing checkmate.toml",
+            "chdir": "run as if started in this directory"})
   dispatchGen(cmList, cmdName = "list", dispatchName = "dispatchList",
-    positional = "paths",
-    help = {"paths": "test files or directories (default: config [tests].dirs)"})
+    positional = "paths", short = {"chdir": 'C'},
+    help = {"paths": "test files or directories (default: config [tests].dirs)",
+            "chdir": "run as if started in this directory"})
 
   proc main() =
     let params = commandLineParams()
