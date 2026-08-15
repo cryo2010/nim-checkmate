@@ -236,6 +236,14 @@ suite "check output enrichment":
     check "five" & "␤" & "line one" in output
     check "lengths differ: 3 vs 5" in output
 
+suite "path display":
+  test "long relative paths shorten with preceding ellipsis":
+    let (output, code) = cm("long_names")
+    check code == 1
+    check " ...nested/directory/structure/t_long.nim " in output
+    check "tests/very/deeply" notin output   # prefix elided
+    check "\n    4:  false" in output        # same-file header still matches
+
 suite "unittest quirk repairs":
   test "helper bare-fail, duplicate names, and skip-after-fail are truthful":
     let (output, code) = cm("quirks")

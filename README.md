@@ -377,3 +377,4 @@ for manual testing:
 | `time_travel` | frozen clocks, pinned start, explicit API, async auto-advance |
 | `own_params` | documented argv-clash limitation with `-t` |
 | `quirks` | std/unittest edge cases checkmate repairs (see below) |
+| `long_names` | long paths shortened with preceding ellipsis |

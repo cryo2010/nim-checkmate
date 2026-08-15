@@ -59,6 +59,19 @@ proc median(xs: seq[float]): float =
 proc testTitle(t: TestOutcome): string =
   if t.suite.len > 0: t.suite & " > " & t.name else: t.name
 
+const maxDisplayPath = 44
+
+proc shortenPath(path: string): string =
+  ## Long paths keep their tail (the significant part), preceded by "...",
+  ## cut at a component boundary when one falls inside the kept range.
+  if path.len <= maxDisplayPath:
+    return path
+  var tail = path[path.len - (maxDisplayPath - 3) .. ^1]
+  let slash = tail.find('/')
+  if slash >= 0 and slash < tail.len - 1:
+    tail = tail[slash + 1 .. ^1]
+  "..." & tail
+
 # --- per-file result line (streamed in completion order) ------------------
 
 proc fileLine*(r: Reporter, fo: FileOutcome) =
@@ -74,7 +87,7 @@ proc fileLine*(r: Reporter, fo: FileOutcome) =
     var durs: seq[float]
     for run in fo.runs: durs.add run.durMs
     note = r.dim("(" & fmtSecs(median(durs)) & ")")
-  echo r.badge(fs), " ", fo.tf.relPath, " ", note
+  echo r.badge(fs), " ", shortenPath(fo.tf.relPath), " ", note
   if r.verbose and fs in {fsPass, fsFail, fsFlaky}:
     for t in aggregateTests(fo):
       let n = t.passes + t.fails + t.skips
@@ -130,7 +143,7 @@ proc headerRewrite(cp, relPath: string): (bool, string) =
   if path == relPath:
     (true, lineNum & ":  " & rest)
   else:
-    (true, path & ":" & lineNum & "  " & rest)
+    (true, shortenPath(path) & ":" & lineNum & "  " & rest)
 
 proc capturedOutputBlock(r: Reporter, fo: FileOutcome) =
   for run in fo.runs:
@@ -145,7 +158,7 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
   let fs = fileStatus(fo)
   if fs notin {fsFail, fsFlaky, fsCompileFail}: return
   echo ""
-  echo r.badge(fs), " ", r.bold(fo.tf.relPath)
+  echo r.badge(fs), " ", r.bold(shortenPath(fo.tf.relPath))
   if fs == fsCompileFail:
     let content = if fileExists(fo.compileLog): readFile(fo.compileLog) else: ""
     echo indented(r.relativize(content.strip(leading = false)), "  ")
