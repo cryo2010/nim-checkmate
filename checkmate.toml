@@ -1,10 +1,32 @@
-# checkmate's own test configuration (dogfooding)
+# checkmate's own test configuration (dogfooding).
+# All available options listed; values differing from defaults are marked.
 
 [tests]
-dirs = ["tests"]
-pattern = "t_*.nim"
-exclude = ["tests/fixtures/*"]
+dirs = ["tests"]            # directories scanned recursively for test files
+pattern = "t_*.nim"         # OVERRIDE (default "t*.nim"): our tests all use t_ prefix
+exclude = ["tests/fixtures/*"]  # OVERRIDE (default []): fixtures are test data, not tests
 
 [run]
-# t_integration shells out to fixtures serially; generous timeout
-timeout = 600
+jobs = 0                    # parallel workers; 0 = number of CPU cores
+loop = 1                    # run the whole suite N times (flake detection)
+loop_in_process = false     # loop inside one process per file (fast, lower fidelity)
+bail = false                # stop on first failing test file
+timeout = 600               # OVERRIDE (default 300): t_integration shells out to fixtures serially
+pass_with_no_tests = false  # exit 0 even when zero tests were run
+allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
+
+[compile]
+nim = "nim"                 # compiler executable
+backend = "c"               # nim backend: c | cpp
+flags = []                  # extra nim flags, e.g. ["-d:release", "--mm:orc"]
+defines = []                # shorthand for -d: defines
+paths = []                  # extra --path entries
+
+[output]
+color = "auto"              # auto | always | never
+verbose = false             # per-test lines and captured output for passing files
+
+[coverage]
+enabled = false             # line coverage via gcov (needs xcrun, llvm-cov or gcov)
+min_lines = 0               # coverage gate: minimum percent (e.g. 80.0) or, if
+                            # negative, max uncovered lines (e.g. -50); 0 disables
