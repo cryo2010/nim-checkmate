@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    # Linux is experimental until proven on a real runner; it must not block.
+    # Flip to false once it is green.
+    continue-on-error: ${{ matrix.os == 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jiro4989/setup-nim-action@v2
+        with:
+          nim-version: "2.2.10"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache nimble packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nimble/pkgs2
+          key: nimble-${{ runner.os }}-${{ hashFiles('checkmate.nimble') }}
+
+      - name: Build
+        run: nimble build -y
+
+      - name: Unit and integration tests
+        run: nimble test
+
+      - name: Dogfood (checkmate runs its own suite)
+        run: ./checkmate --color:never
