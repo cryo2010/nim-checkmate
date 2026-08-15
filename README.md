@@ -47,6 +47,7 @@ checkmate list [paths...]              # print discovered test files
 | Option | Meaning |
 | --- | --- |
 | `paths...` | test files (verbatim) or directories (walked with the filename pattern) |
+| `-C`, `--chdir DIR` | run as if started in DIR (git-style) |
 | `-t`, `--filter PAT` | run tests whose name starts or ends with PAT; repeatable (OR'd) |
 | `-l`, `--loop N` | run the whole suite N times to catch flaky tests |
 | `--loop-in-process` | loop each test inside one process per file (fast, lower fidelity) |
@@ -283,3 +284,35 @@ nimble build      # build ./checkmate
 nimble test       # unit + integration tests (fixtures under tests/fixtures/)
 ./checkmate       # dogfood: checkmate runs its own suite
 ```
+
+CI (`.github/workflows/ci.yml`) runs build, tests, and the dogfood on
+macOS and Linux (Linux is experimental until proven on a real runner).
+
+### Fixture projects
+
+`tests/fixtures/` holds self-contained subprojects, each with a static
+`checkmate.toml`, exercised end to end by `t_integration.nim` and handy
+for manual testing:
+
+```sh
+./checkmate -C tests/fixtures/flaky --loop:10       # watch FLAKY reporting
+./checkmate -C tests/fixtures/time_travel           # 5 virtual minutes in ~2 s
+./checkmate -C tests/fixtures/sleepy                # 1 s timeout vs 2 s sleep
+```
+
+| Fixture | Demonstrates |
+| --- | --- |
+| `passing` | default config, green suites, a skipped test |
+| `failing` | check failures and exception reporting |
+| `flaky` | marker-file flake for `--loop` (delete `flake_marker` for a deterministic first iteration) |
+| `bail` | `--bail` skipping later suites (`jobs = 1` for ordering) |
+| `hanging` | watchdog kill of a hung test; per-test budget proof (`t_steady`) |
+| `sleepy` | `timeout = 1` vs a 2 s sleeper |
+| `crashing` | SIGSEGV attribution to the open test |
+| `noisy` | captured stdout/stderr shown for failing files |
+| `compile_error` | verbatim compiler error passthrough |
+| `empty_test` | empty-test enforcement, helper-proc counting, escape hatches |
+| `no_tests` | zero test files: fails unless `--pass-with-no-tests` |
+| `covered` | coverage table and `min_lines` gating |
+| `time_travel` | frozen clocks, pinned start, explicit API, async auto-advance |
+| `own_params` | documented argv-clash limitation with `-t` |
