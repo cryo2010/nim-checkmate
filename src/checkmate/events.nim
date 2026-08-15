@@ -3,7 +3,7 @@
 ## loop iterations. The inject module cannot import this file (it must be
 ## self-contained for embedding); an integration test keeps them in sync.
 
-import std/[json, os, sequtils, strutils, tables]
+import std/[json, os, sequtils, sets, strutils, tables]
 import ./discovery
 
 type
@@ -179,6 +179,15 @@ proc fileStatus*(fo: FileOutcome): FileStatus =
     fsFail
   else:
     fsFlaky
+
+proc totalTestsRun*(s: SuiteSummary): int =
+  ## Distinct tests that executed (incl. skipped) across all files.
+  for fo in s.files:
+    var seen = initHashSet[string]()
+    for run in fo.runs:
+      for t in run.outcome.tests:
+        seen.incl t.suite & "::" & t.name
+    result += seen.len
 
 proc passedIters*(fo: FileOutcome): int =
   for run in fo.runs:

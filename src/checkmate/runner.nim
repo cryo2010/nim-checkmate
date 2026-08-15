@@ -120,12 +120,14 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
 
   result = SuiteSummary(files: fos, bailed: bailed, wallMs: elapsedMs(t0))
 
-proc exitCodeFor*(s: SuiteSummary): int =
+proc exitCodeFor*(s: SuiteSummary, passWithNoTests = false): int =
   if s.files.len == 0:
-    return 1  # no test files found
+    return (if passWithNoTests: 0 else: 1)  # no test files found
   if s.bailed:
     return 1
   for fo in s.files:
     if fileStatus(fo) in {fsFail, fsCompileFail, fsFlaky}:
       return 1
+  if totalTestsRun(s) == 0 and not passWithNoTests:
+    return 1  # files ran but zero tests executed (e.g. -t matched nothing)
   0

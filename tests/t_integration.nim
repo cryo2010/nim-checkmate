@@ -42,6 +42,15 @@ suite "fixture runs":
     check "tests:  1/1 passed" in output
     check "no matching tests" in output   # the file without matches
 
+  test "filter matching nothing fails by default":
+    let (output, code) = cm("passing", "-t zzz_no_such_test")
+    check code == 1
+    check "failing because no tests were run" in output
+
+  test "pass-with-no-tests allows zero matches":
+    let (_, code) = cm("passing", "-t zzz_no_such_test --pass-with-no-tests")
+    check code == 0
+
   test "loop detects flakes":
     removeFile(fixture("flaky") / "flake_marker")
     let (output, code) = cm("flaky", "--loop:4")

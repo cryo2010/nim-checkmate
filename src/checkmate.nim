@@ -12,24 +12,28 @@ const checkmateVersion = "0.1.0"
 proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
            loop = 0; jobs = 0; bail = false; timeout = -1;
            verbose = false; color = ""; nimflags: seq[string] = @[];
-           coverage = false): int =
+           coverage = false; passWithNoTests = false): int =
   ## Discover, compile, and run std/unittest test files.
   try:
     var cfg = loadConfig(findProjectRoot(getCurrentDir()))
-    cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags)
+    cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
+                 passWithNoTests)
     let rep = newReporter(cfg, filtered = filter.len > 0)
     let summary = runOnce(cfg, paths, filter, rep)
     if summary.files.len == 0:
       stderr.writeLine "checkmate: no test files found (dirs: " &
         $cfg.dirs & ", pattern: " & cfg.pattern & ")"
-      return 1
+      return exitCodeFor(summary, cfg.passWithNoTests)
     rep.finish(summary)
     if cfg.covEnabled:
       discard covReport(cfg)
-    exitCodeFor(summary)
+    result = exitCodeFor(summary, cfg.passWithNoTests)
+    if result != 0 and totalTestsRun(summary) == 0 and not summary.bailed:
+      stderr.writeLine "checkmate: failing because no tests were run " &
+        "(use --pass-with-no-tests to allow this)"
   except UsageError as e:
     stderr.writeLine "checkmate: " & e.msg
-    2
+    result = 2
 
 proc cmInit(force = false): int =
   ## Generate a checkmate.toml with the default configuration.
@@ -69,6 +73,7 @@ when isMainModule:
       "color": "auto|always|never",
       "nimflags": "extra flags passed to nim c",
       "coverage": "report line coverage (needs xcrun, llvm-cov or gcov)",
+      "passWithNoTests": "exit 0 even when zero tests were run",
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
     help = {"force": "overwrite an existing checkmate.toml"})

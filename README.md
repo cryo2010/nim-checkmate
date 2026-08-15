@@ -56,6 +56,7 @@ checkmate list [paths...]              # print discovered test files
 | `--color auto\|always\|never` | color mode (`NO_COLOR` is honored) |
 | `-n`, `--nimflags FLAG` | extra flags for `nim c`; repeatable |
 | `--coverage` | print a line-coverage table after the run |
+| `--pass-with-no-tests` | exit 0 even when zero tests were run |
 
 Examples:
 
@@ -86,6 +87,7 @@ jobs = 0                  # 0 = CPU cores
 loop = 1
 bail = false
 timeout = 300             # seconds per test binary; 0 disables
+pass_with_no_tests = false  # exit 0 even when zero tests were run
 
 [compile]
 nim = "nim"
