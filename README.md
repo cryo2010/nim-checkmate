@@ -188,7 +188,9 @@ strings differ at index 100 (lengths 201 and 201, 1 differing position)
 
 Every mismatching column inside the window gets its own caret, and for
 equal-length strings the header reports the total count of differing
-positions across the whole string.
+positions across the whole string. Control characters render as
+single-column placeholders inside the window (`␤` newline, `␍` CR,
+`␉` tab) so multiline strings keep the excerpt and carets on one line.
 
 ## Time travel
 

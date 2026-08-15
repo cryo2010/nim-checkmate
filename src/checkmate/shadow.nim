@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 7
+const OverlayVersion = 8
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -126,11 +126,23 @@ proc checkmateTrim*(s: string): string =
   if t.len <= cap: t
   else: t[0 ..< cap] & " ... (" & $(t.len - cap) & " more chars)"
 
+proc checkmateVisible(c: char): string =
+  ## Control chars as single-column placeholders so diff windows stay on
+  ## one display line and caret columns line up (one glyph per char).
+  case c
+  of '\n': "␤"   # symbol for newline
+  of '\r': "␍"   # symbol for carriage return
+  of '\t': "␉"   # symbol for horizontal tab
+  else:
+    if c < ' ' or c == '\127': "·"
+    else: $c
+
 proc checkmateWindow(s: string, i: int): string =
   let lo = max(0, i - 15)
   let hi = min(s.len, i + 25)
   if lo > 0: result.add "..."
-  result.add s[lo ..< hi]
+  for p in lo ..< hi:
+    result.add checkmateVisible(s[p])
   if hi < s.len: result.add "..."
 
 proc checkmateExplainDiff*(a, b: string) =

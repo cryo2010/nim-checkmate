@@ -224,6 +224,9 @@ suite "check output enrichment":
     check "strings differ at index 1500 (lengths 2000 and 2000, 2 differing positions)" in output
     check "brownZfoxZjumps" in output
     check "^   ^" in output   # carets under BOTH divergence columns
+    # newlines render as single-column placeholders inside diff windows
+    check "fiveXline one" & "␤" & "line two" in output
+    check "five" & "␤" & "line one" in output
     check "lengths differ: 3 vs 5" in output
 
 suite "time travel":

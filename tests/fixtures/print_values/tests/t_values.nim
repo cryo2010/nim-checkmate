@@ -28,7 +28,7 @@ test "seqs show the first mismatching index":
 test "difference beyond the truncation window":
   # both printed values truncate to identical 400-char prefixes; only the
   # diff line reveals where they diverge
-  var expected = "the quick brown fox jumps over the lazy dog. ".repeat(45)[0 ..< 2000]
+  var expected = "the quick brown fox jumps over\nthe lazy dog. ".repeat(45)[0 ..< 2000]
   var actual = expected
   actual[1500] = 'Z'
   actual[1504] = 'Z'
@@ -36,3 +36,9 @@ test "difference beyond the truncation window":
 
 test "seqs of different lengths":
   check @[1, 2, 3] == @[1, 2, 3, 4, 5]
+
+test "multiline strings keep the diff window on one line":
+  let expected = "line one\nline two\nline three\nline four\nline five\n".repeat(2)
+  var actual = expected
+  actual[48] = 'X'   # replaces the newline after the first "line five"
+  check actual == expected
