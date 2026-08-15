@@ -57,6 +57,7 @@ checkmate list [paths...]              # print discovered test files
 | `-n`, `--nimflags FLAG` | extra flags for `nim c`; repeatable |
 | `--coverage` | print a line-coverage table after the run |
 | `--pass-with-no-tests` | exit 0 even when zero tests were run |
+| `--allow-empty-tests` | don't fail tests that execute zero assertions |
 
 Examples:
 
@@ -88,6 +89,7 @@ loop = 1
 bail = false
 timeout = 300             # seconds per test binary; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
+allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
 
 [compile]
 nim = "nim"
@@ -122,6 +124,28 @@ across iterations is reported as flaky, and flaky suites fail the run:
     also failed in iteration(s): 4, 7
 ```
 
+## Empty-test enforcement
+
+A test that executes zero assertions can only ever pass, so by default it
+fails:
+
+```
+ FAIL  tests/t_api.nim
+  users > fetches the profile
+    Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)
+```
+
+Counting happens at runtime, so assertions made inside helper procs (in any
+module) count. `check`, `require`, and `expect` all count; `skip()`ped tests
+are exempt. A deliberate smoke test stays green with an explicit
+`check true`. Disable globally with `--allow-empty-tests` or
+`allow_empty_tests = true`.
+
+This works by compiling tests against a generated overlay of your own
+toolchain's `std/unittest` (see How it works); if a future Nim version
+changes unittest's internals, checkmate detects the mismatch, prints a
+warning, and compiles fully stock instead.
+
 ## Coverage
 
 `--coverage` (or `[coverage] enabled = true`) compiles tests with gcov
@@ -145,7 +169,12 @@ module (embedded in the checkmate binary, materialized into `.checkmate/`)
 that registers a JSONL-emitting `OutputFormatter` before `std/unittest`
 initializes. unittest then never installs its console formatter, checkmate
 gets structured per-test events over a file, and your binaries stay fully
-stock when run standalone. Test binaries run in a polling process pool with
+stock when run standalone. For empty-test enforcement, tests compile with
+`--lib:` pointing at `.checkmate/libfarm`, a symlink mirror of your
+toolchain's lib directory whose `pure/unittest.nim` is a runtime-patched
+copy of your own toolchain's source with assertion-counting wrappers; both
+`import unittest` and `import std/unittest` resolve to it. Test binaries
+run in a polling process pool with
 their output captured per run; each file gets a private nimcache, so
 parallel compiles are safe and unchanged files rebuild in well under a
 second. Test-name filters are passed straight to unittest's own filtering.
@@ -161,6 +190,13 @@ second. Test-name filters are passed straight to unittest's own filtering.
   `paramStr` too. Without `-t`, no args are passed.
 - **Checks inside spawned threads** don't reach formatters (true of stock
   unittest as well) and are invisible to checkmate's per-test reporting.
+  They also don't count for empty-test enforcement (the counter is
+  thread-local): a test asserting only in spawned threads needs a
+  `check true` in its main body. Assertions in `teardown` blocks don't
+  count either (they run after the per-test verdict).
+- **Empty-test enforcement is baked in at compile time**, so binaries under
+  `.checkmate/bin/` enforce it even when run standalone; a `--nimflags`
+  `--lib:` override is shadowed by checkmate's own when enforcement is on.
 - **POSIX only** for now (`/bin/sh` process wrapper); Windows would need a
   small port in `pool.nim`.
 

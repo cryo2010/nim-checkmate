@@ -100,6 +100,30 @@ suite "fixture runs":
     check "src/mathlib.nim" in output
     check "(8/11)" in output   # sign branches + neverCalled stay uncovered
 
+  test "empty test fails by default":
+    let (output, code) = cm("empty_test")
+    check code == 1
+    check "Test has no assertions" in output
+    check "empty enforcement > has no assertions" in output
+    check "tests:  4/6 passed (1 failed, 1 skipped)" in output
+
+  test "allow-empty-tests disables enforcement":
+    let (output, code) = cm("empty_test", "--allow-empty-tests")
+    check code == 0
+    check "Test has no assertions" notin output
+
+  test "farm-compiled binary enforces standalone":
+    discard cm("empty_test")  # ensure the binary is farm-compiled
+    # unset CHECKMATE_EVENTS_FILE: when this suite itself runs under
+    # checkmate, the child would otherwise inherit it, suppress its console
+    # output, and append its events into OUR events file
+    let (output, code) = execCmdEx(
+      "env -u CHECKMATE_EVENTS_FILE " &
+        quoteShell(fixture("empty_test") / ".checkmate" / "bin" / "tests__t_mixed"),
+      workingDir = fixture("empty_test"))
+    check code == 1
+    check "Test has no assertions" in output
+
   test "list prints files without running":
     # subcommand must come first; flags before it would dispatch to run
     let (output, code) = execCmdEx(quoteShell(checkmateBin) & " list",
