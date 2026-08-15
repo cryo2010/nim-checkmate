@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 3
+const OverlayVersion = 4
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -116,7 +116,26 @@ const unittestPatches: seq[(string, string)] = @[
 const checkmateEmptyTestGuard* = true
 var checkmateAssertions* {.threadvar.}: int
 
+proc checkmateTrim*(s: string): string =
+  ## Bounds printed operand values so a failing comparison of huge strings
+  ## cannot flood the report; also drops trailing newlines from repr output.
+  var t = s
+  while t.len > 0 and t[^1] in {'\n', '\r'}:
+    t.setLen(t.len - 1)
+  const cap = 400
+  if t.len <= cap: t
+  else: t[0 ..< cap] & " ... (" & $(t.len - cap) & " more chars)"
+
 macro checkmateOrigCheck*(conditions: untyped): untyped ="""),
+  # richer operand printing: repr fallback for $-less types, bounded length
+  ("""  template print(name: untyped, value: typed) =
+    when compiles(string($value)):
+      checkpoint(name & " was " & $value)""",
+   """  template print(name: untyped, value: typed) =
+    when compiles(string($value)):
+      checkpoint(name & " was " & checkmateTrim($value))
+    elif compiles(checkmateTrim(repr(value))):
+      checkpoint(name & " was " & checkmateTrim(repr(value)))"""),
   # 2: rename test
   ("template test*(name, body) {.dirty.} =",
    "template checkmateOrigTest*(name, body) {.dirty.} ="),

@@ -170,6 +170,11 @@ toolchain's `std/unittest` (see How it works); if a future Nim version
 changes unittest's internals, checkmate detects the mismatch, prints a
 warning, and compiles fully stock instead.
 
+The overlay also upgrades failing-check output: operand values of types
+without a `$` are printed via `repr` (stock unittest silently omits them),
+and printed values are capped at 400 characters with an exact
+`... (N more chars)` remainder.
+
 ## Time travel
 
 `--time-travel` (or `[run] time_travel = true`) freezes the clocks inside
@@ -312,6 +317,7 @@ for manual testing:
 | `noisy` | captured stdout/stderr shown for failing files |
 | `compile_error` | verbatim compiler error passthrough |
 | `empty_test` | empty-test enforcement, helper-proc counting, escape hatches |
+| `print_values` | enriched check output: repr fallback, value truncation |
 | `no_tests` | zero test files: fails unless `--pass-with-no-tests` |
 | `covered` | coverage table and `min_lines` gating |
 | `time_travel` | frozen clocks, pinned start, explicit API, async auto-advance |

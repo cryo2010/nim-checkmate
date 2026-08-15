@@ -210,6 +210,15 @@ suite "fixture runs":
     check "tests/t_ok.nim" in output
     check "PASS" notin output
 
+suite "check output enrichment":
+  test "dollar-less types print via repr and huge values truncate":
+    let (output, code) = cm("print_values")
+    check code == 1
+    check "a was " in output              # absent entirely under stock unittest
+    check "b was " in output
+    check "... (1600 more chars)" in output
+    check count(output, 'x') < 600        # 2000-char value was truncated
+
 suite "time travel":
   test "virtual sleeps finish in real milliseconds":
     let t0 = getMonoTime()
