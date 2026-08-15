@@ -8,10 +8,18 @@ type
   Reporter* = object
     colors*: bool
     verbose*: bool
-    filtered*: bool   # a -t filter is active: empty files are expected
+    filtered*: bool     # a -t filter is active: empty files are expected
+    rootPrefix*: string # absolute project root + separator, stripped from output
 
 proc newReporter*(cfg: Config, filtered = false): Reporter =
-  Reporter(colors: cfg.colorsEnabled, verbose: cfg.verbose, filtered: filtered)
+  Reporter(colors: cfg.colorsEnabled, verbose: cfg.verbose, filtered: filtered,
+           rootPrefix: cfg.projectRoot & $DirSep)
+
+proc relativize(r: Reporter, s: string): string =
+  ## Nim embeds absolute source paths in check messages, stack traces, and
+  ## compile errors regardless of how the file was passed to the compiler;
+  ## strip the project root so output is project-relative, jest-style.
+  if r.rootPrefix.len > 1: s.replace(r.rootPrefix, "") else: s
 
 # --- styling --------------------------------------------------------------
 
@@ -95,7 +103,7 @@ proc capturedOutputBlock(r: Reporter, fo: FileOutcome) =
       let content = if fileExists(run.logPath): readFile(run.logPath) else: ""
       if content.strip.len > 0:
         echo r.dim("  --- captured output (iteration " & $run.iteration & ") ---")
-        echo indented(content.strip(leading = false), "  ")
+        echo indented(r.relativize(content.strip(leading = false)), "  ")
       return  # first failing iteration only
 
 proc failureBlock*(r: Reporter, fo: FileOutcome) =
@@ -105,7 +113,7 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
   echo r.badge(fs), " ", r.bold(fo.tf.relPath)
   if fs == fsCompileFail:
     let content = if fileExists(fo.compileLog): readFile(fo.compileLog) else: ""
-    echo indented(content.strip(leading = false), "  ")
+    echo indented(r.relativize(content.strip(leading = false)), "  ")
     return
   for t in aggregateTests(fo):
     if t.failures.len == 0: continue
@@ -119,9 +127,9 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     echo "  ", r.red(testTitle(t)), suffix
     let f = t.failures[0]
     for cp in f.checkpoints:
-      echo indented(cp, "    ")
+      echo indented(r.relativize(cp), "    ")
     if f.stack.strip.len > 0:
-      echo r.dim(indented(f.stack.strip(leading = false), "    "))
+      echo r.dim(indented(r.relativize(f.stack.strip(leading = false)), "    "))
     if t.failures.len > 1:
       var iters: seq[string]
       for other in t.failures[1 .. ^1]: iters.add $other.iteration

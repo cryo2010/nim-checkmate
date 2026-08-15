@@ -31,7 +31,7 @@ suite "fixture runs":
   test "failing fixture reports checkpoints and exits 1":
     let (output, code) = cm("failing")
     check code == 1
-    check "Check failed: a + b == 5" in output
+    check "\n    tests/t_bad.nim(7, 16): Check failed: a + b == 5" in output
     check "a + b was 4" in output
     check "suites: 1/2 passed (1 failed)" in output
     check "tests:  2/4 passed (2 failed)" in output

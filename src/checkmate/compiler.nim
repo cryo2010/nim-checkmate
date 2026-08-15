@@ -54,5 +54,8 @@ proc buildCompileTask*(cfg: Config, tf: TestFile,
   parts.add "--colors:off"
   parts.add "--hints:off"
   parts.add "--out:" & quoteShell(result.binPath)
-  parts.add quoteShell(tf.absPath)
+  # relative to projectRoot (the compile task's working dir): checkpoint
+  # messages, stack traces, and compile errors then print project-relative
+  # paths instead of absolute ones
+  parts.add quoteShell(tf.relPath)
   result.cmd = parts.join(" ")
