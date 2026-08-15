@@ -218,6 +218,8 @@ suite "check output enrichment":
     check "b was " in output
     check "... (1600 more chars)" in output
     check count(output, 'x') < 600        # 2000-char value was truncated
+    check "strings differ at index 100 (lengths 201 and 201)" in output
+    check "first mismatch at index 2: 3 vs 9" in output
 
 suite "time travel":
   test "virtual sleeps finish in real milliseconds":

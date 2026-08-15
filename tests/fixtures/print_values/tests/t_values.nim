@@ -16,3 +16,11 @@ test "object without a dollar operator":
 test "huge values are truncated":
   let big = 'x'.repeat(2000)
   check big == "small"
+
+test "long strings show the first difference":
+  let lhs = 'a'.repeat(100) & "X" & 'a'.repeat(100)
+  let rhs = 'a'.repeat(100) & "Y" & 'a'.repeat(100)
+  check lhs == rhs
+
+test "seqs show the first mismatching index":
+  check @[1, 2, 3, 4] == @[1, 2, 9, 4]

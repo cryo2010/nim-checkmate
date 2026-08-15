@@ -173,7 +173,17 @@ warning, and compiles fully stock instead.
 The overlay also upgrades failing-check output: operand values of types
 without a `$` are printed via `repr` (stock unittest silently omits them),
 and printed values are capped at 400 characters with an exact
-`... (N more chars)` remainder.
+`... (N more chars)` remainder. Failing `==` checks additionally get
+comparison-aware context: long strings report the first differing index
+with windowed excerpts around it, and seqs/arrays report the first
+mismatching index and elements:
+
+```
+Check failed: lhs == rhs
+strings differ at index 100 (lengths 201 and 201)
+  lhs: ...aaaaaaaaaaaaaaaXaaaaaaaaaaaaaaaaaaaaaaaa...
+  rhs: ...aaaaaaaaaaaaaaaYaaaaaaaaaaaaaaaaaaaaaaaa...
+```
 
 ## Time travel
 

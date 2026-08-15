@@ -21,7 +21,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 4
+const OverlayVersion = 5
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -126,7 +126,62 @@ proc checkmateTrim*(s: string): string =
   if t.len <= cap: t
   else: t[0 ..< cap] & " ... (" & $(t.len - cap) & " more chars)"
 
+proc checkmateWindow(s: string, i: int): string =
+  let lo = max(0, i - 15)
+  let hi = min(s.len, i + 25)
+  if lo > 0: result.add "..."
+  result.add s[lo ..< hi]
+  if hi < s.len: result.add "..."
+
+proc checkmateExplainDiff*(a, b: string) =
+  ## Comparison-aware context for failing string equality: first differing
+  ## index plus windows around it (long strings only; short values are
+  ## already printed in full).
+  var i = 0
+  while i < min(a.len, b.len) and a[i] == b[i]: inc i
+  if i >= a.len and i >= b.len: return
+  if max(a.len, b.len) <= 40: return
+  checkpoint("strings differ at index " & $i &
+             " (lengths " & $a.len & " and " & $b.len & ")")
+  checkpoint("  lhs: " & checkmateWindow(a, i))
+  checkpoint("  rhs: " & checkmateWindow(b, i))
+
+proc checkmateExplainDiffSeq[T](a, b: openArray[T]) =
+  var i = 0
+  while i < min(a.len, b.len) and a[i] == b[i]: inc i
+  if i >= a.len and i >= b.len: return
+  if a.len != b.len:
+    checkpoint("lengths differ: " & $a.len & " vs " & $b.len)
+  if i < min(a.len, b.len):
+    when compiles($a[i]):
+      checkpoint("first mismatch at index " & $i & ": " &
+                 checkmateTrim($a[i]) & " vs " & checkmateTrim($b[i]))
+    elif compiles(checkmateTrim(repr(a[i]))):
+      checkpoint("first mismatch at index " & $i & ": " &
+                 checkmateTrim(repr(a[i])) & " vs " & checkmateTrim(repr(b[i])))
+    else:
+      checkpoint("first mismatch at index " & $i)
+
+proc checkmateExplainDiff*[T](a, b: seq[T]) =
+  checkmateExplainDiffSeq(a, b)
+
+proc checkmateExplainDiff*[I; T](a, b: array[I, T]) =
+  checkmateExplainDiffSeq(a, b)
+
+proc checkmateExplainDiff*[A; B](a: A, b: B) {.inline.} =
+  discard  # no extra context for other types
+
 macro checkmateOrigCheck*(conditions: untyped): untyped ="""),
+  # inject the diff explainer into the printouts of failing == checks
+  ("""    let (assigns, check, printOuts) = inspectArgs(checked)
+    let lineinfo = newStrLitNode(checked.lineInfo)""",
+   """    let (assigns, check, printOuts) = inspectArgs(checked)
+    if check.kind == nnkInfix and check.len == 3 and
+        check[0].kind in {nnkIdent, nnkOpenSymChoice, nnkClosedSymChoice,
+                          nnkSym} and
+        $check[0] == "==":
+      printOuts.add newCall(bindSym"checkmateExplainDiff", check[1], check[2])
+    let lineinfo = newStrLitNode(checked.lineInfo)"""),
   # richer operand printing: repr fallback for $-less types, bounded length
   ("""  template print(name: untyped, value: typed) =
     when compiles(string($value)):
