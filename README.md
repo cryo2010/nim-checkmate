@@ -50,6 +50,8 @@ checkmate list [paths...]              # print discovered test files
 | `-t`, `--filter PAT` | run tests whose name starts or ends with PAT; repeatable (OR'd) |
 | `-l`, `--loop N` | run the whole suite N times to catch flaky tests |
 | `--loop-in-process` | loop each test inside one process per file (fast, lower fidelity) |
+| `--time-travel` | freeze clocks; sleeps are instant, time advances virtually |
+| `--time-start T` | pin the virtual wall clock (ISO 8601) |
 | `-j`, `--jobs N` | parallel workers (default: CPU cores) |
 | `-b`, `--bail` | stop on the first failing test file |
 | `--timeout SECS` | seconds a single test may run (default 300; 0 disables) |
@@ -93,6 +95,8 @@ bail = false
 timeout = 300             # seconds a single test may run; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
+time_travel = false       # virtualize clocks: sleep() instant, time frozen
+time_start = ""           # pin the virtual wall clock (ISO 8601)
 
 [compile]
 nim = "nim"
@@ -164,6 +168,45 @@ This works by compiling tests against a generated overlay of your own
 toolchain's `std/unittest` (see How it works); if a future Nim version
 changes unittest's internals, checkmate detects the mismatch, prints a
 warning, and compiles fully stock instead.
+
+## Time travel
+
+`--time-travel` (or `[run] time_travel = true`) freezes the clocks inside
+your test binaries: `sleep()` returns instantly, `sleepAsync` timers fire
+without waiting, and `getTime`/`now`/`epochTime`/`getMonoTime` all read a
+virtual clock that only advances when something sleeps or asks it to. A
+suite that sleeps for minutes finishes in milliseconds, with zero test
+changes, and timing logic becomes deterministic.
+
+```nim
+test "cache expires":
+  cache.put("k", ttl = initDuration(hours = 1))
+  sleep(3_600_001)          # instant; virtual clock advances 1 h
+  check not cache.has("k")  # getTime() agrees an hour has passed
+```
+
+Pin the wall clock for date-dependent tests with
+`time_start = "2020-06-15T12:00:00Z"` (or `--time-start`), and control time
+explicitly from tests when auto mode isn't enough:
+
+```nim
+advanceTime(1500)                        # ms
+advanceTime(initDuration(minutes = 5))
+travelTo(dateTime(1999, mDec, 31))       # wall jump, backward allowed;
+check timeTravelActive()                 # monotonic time never regresses
+```
+
+The API arrives via `import std/unittest` under checkmate (helper modules
+can `import checkmate_timebase`); files that must also compile stock can
+guard with `when declared(advanceTime)`. Reported test durations stay
+real-clock, and the per-test timeout still catches genuine hangs.
+
+Caveats: an async timeout racing real pending I/O never expires virtually
+(the real-time watchdog backstops it); a busy-wait on the clock without
+sleeping spins until the watchdog kills it; `cpuTime`, raw
+`clock_gettime`, sockets, and external processes see real time. Requires
+the stdlib overlay (see Empty-test enforcement); if it cannot be built,
+checkmate warns and runs without time travel.
 
 ## Coverage
 

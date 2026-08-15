@@ -3,7 +3,7 @@
 ## Also keeps the JSONL protocol in sync between the embedded inject module
 ## and events.nim (see "events protocol round trip").
 
-import std/[unittest, os, osproc, strutils]
+import std/[unittest, monotimes, os, osproc, strutils, times]
 import checkmate/events
 
 let projectRoot = getCurrentDir()
@@ -174,6 +174,25 @@ suite "fixture runs":
     check code == 0
     check "tests/t_ok.nim" in output
     check "PASS" notin output
+
+suite "time travel":
+  test "virtual sleeps finish in real milliseconds":
+    let t0 = getMonoTime()
+    let (output, code) = cm("time_travel")
+    let wallMs = (getMonoTime() - t0).inMilliseconds
+    check code == 0
+    check "suites: 4/4 passed" in output
+    # the fixture sleeps/advances >5 virtual minutes; generous real bound
+    # for cold compiles: the run phase itself is milliseconds
+    check wallMs < 60_000
+    check "tests:  7/7 passed" in output
+
+  test "time-start CLI override repins the clock":
+    # t_pinned asserts year 2020, so a 1999 pin must fail exactly that test
+    let (output, code) = cm("time_travel", "--time-start:1999-12-31T00:00:00Z")
+    check code == 1
+    check "wall clock is pinned to the configured start" in output
+    check "tests:  6/7 passed (1 failed)" in output
 
 suite "init generation":
   test "init writes checkmate.toml, refuses overwrite, honors --force":
