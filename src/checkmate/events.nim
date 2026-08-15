@@ -113,7 +113,7 @@ proc parseEvents*(path: string): seq[Event] =
     result.add ev
 
 proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
-                 testTimeoutMs = 0.0): FileRunOutcome =
+                 testTimeoutMs = 0.0, dedupeNames = true): FileRunOutcome =
   ## Attribute failures to tests, detect crashes (testStarted without
   ## testEnded + abnormal exit) and empty runs. With testTimeoutMs > 0,
   ## a test that COMPLETED but exceeded the per-test budget is rewritten
@@ -123,6 +123,8 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
   var openSuite = ""
   var pendingCheckpoints: seq[string]
   var pendingStack = ""
+  var pendingFailure = false
+  var nameCounts = initTable[string, int]()
   for ev in events:
     case ev.kind
     of ekInit: discard
@@ -132,9 +134,14 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
       openTest = ev.test
       pendingCheckpoints = @[]
       pendingStack = ""
+      pendingFailure = false
     of ekFailure:
       if openTest.len > 0:
-        pendingCheckpoints.add ev.checkpoints
+        pendingFailure = true
+        if ev.checkpoints.len > 0:
+          pendingCheckpoints.add ev.checkpoints
+        else:
+          pendingCheckpoints.add "fail() was called (no checkpoint recorded)"
         if ev.stack.len > 0: pendingStack = ev.stack
       else:
         result.tests.add TestRun(
@@ -142,17 +149,28 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
           checkpoints: ev.checkpoints, stack: ev.stack)
     of ekTestEnded:
       var status = ev.status
-      if status == "OK" and pendingCheckpoints.len > 0:
-        # fail() inside a helper proc cannot see testStatusIMPL and only
-        # sets the program exit code; the failureOccurred event it emitted
-        # is authoritative, so the test DID fail
+      if status in ["OK", "SKIPPED"] and pendingFailure:
+        # failureOccurred is authoritative: fail() inside a helper proc
+        # cannot see testStatusIMPL (test ends OK), and skip() after a
+        # failure clears the status but the exit code already says failed
         status = "FAILED"
+      var name = ev.test
+      let key = ev.suite & "::" & ev.test
+      let count = nameCounts.getOrDefault(key) + 1
+      nameCounts[key] = count
+      if dedupeNames and count > 1:
+        # duplicate test names in one run are DISTINCT tests; without a
+        # suffix the aggregation would merge them into a phantom flake.
+        # (Skipped under in-process looping, where the k-th occurrence of
+        # a name IS iteration k.)
+        name.add " (" & $count & ")"
       result.tests.add TestRun(
-        suite: ev.suite, name: ev.test, status: status,
+        suite: ev.suite, name: name, status: status,
         durMs: ev.durMs, checkpoints: pendingCheckpoints, stack: pendingStack)
       openTest = ""
       pendingCheckpoints = @[]
       pendingStack = ""
+      pendingFailure = false
   if testTimeoutMs > 0:
     for t in result.tests.mitems:
       if t.status == "OK" and t.durMs > testTimeoutMs:

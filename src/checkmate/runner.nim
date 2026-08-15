@@ -154,7 +154,8 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
     proc(t: PoolTask, r: PoolResult): PoolCtl =
       let (fi, iteration) = meta[t.id]
       let outcome = foldEvents(parseEvents(evPaths[t.id]), r.exitCode, r.timedOut,
-                               testTimeoutMs = cfg.timeoutSec.float * 1000)
+                               testTimeoutMs = cfg.timeoutSec.float * 1000,
+                               dedupeNames = not inProcessLoop)
       if inProcessLoop:
         fos[fi].runs = splitInProcessRuns(
           outcome, loopN, r.exitCode, r.timedOut, r.durationMs, t.logPath)

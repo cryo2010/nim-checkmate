@@ -51,6 +51,39 @@ suite "foldEvents":
     check o.tests[0].checkpoints == @["check failed"]
     check o.tests[0].stack == "tb"
 
+  test "bare fail() with no checkpoints is repaired and annotated":
+    let evs = @[
+      Event(kind: ekTestStarted, test: "t"),
+      Event(kind: ekFailure),   # fail() in a helper, no checkpoint recorded
+      Event(kind: ekTestEnded, test: "t", status: "OK", durMs: 1),
+    ]
+    let o = foldEvents(evs, 1, false)
+    check o.tests[0].status == "FAILED"
+    check "fail() was called (no checkpoint recorded)" in o.tests[0].checkpoints
+
+  test "skip() after a failure is repaired to FAILED":
+    let evs = @[
+      Event(kind: ekTestStarted, test: "t"),
+      Event(kind: ekFailure, checkpoints: @["cp"]),
+      Event(kind: ekTestEnded, test: "t", status: "SKIPPED", durMs: 1),
+    ]
+    check foldEvents(evs, 1, false).tests[0].status == "FAILED"
+
+  test "duplicate test names become distinct tests":
+    let evs = @[
+      Event(kind: ekTestStarted, test: "same"),
+      Event(kind: ekTestEnded, test: "same", status: "OK", durMs: 1),
+      Event(kind: ekTestStarted, test: "same"),
+      Event(kind: ekFailure, checkpoints: @["cp"]),
+      Event(kind: ekTestEnded, test: "same", status: "FAILED", durMs: 1),
+    ]
+    let o = foldEvents(evs, 1, false)
+    check o.tests[0].name == "same"
+    check o.tests[1].name == "same (2)"
+    # in-process looping keeps occurrences merged (occurrence k = iteration k)
+    let o2 = foldEvents(evs, 1, false, dedupeNames = false)
+    check o2.tests[1].name == "same"
+
   test "helper-proc failure with OK status is repaired to FAILED":
     # fail() outside the test body's scope cannot set testStatusIMPL
     let evs = @[
