@@ -19,6 +19,13 @@ type CheckmateFormatter = ref object of OutputFormatter
   f: File
   testStart: MonoTime
 
+# durations must stay REAL under time travel (the per-test timeout rewrite
+# depends on them); the overlay exports the renamed real clock
+when declared(checkmateOrigGetMonoTime):
+  template checkmateRealMono(): MonoTime = checkmateOrigGetMonoTime()
+else:
+  template checkmateRealMono(): MonoTime = getMonoTime()
+
 proc emit(cf: CheckmateFormatter, node: JsonNode) =
   cf.f.writeLine($node)
   cf.f.flushFile()
@@ -27,7 +34,7 @@ method suiteStarted(cf: CheckmateFormatter, suiteName: string) =
   cf.emit(%*{"e": "suiteStarted", "suite": suiteName})
 
 method testStarted(cf: CheckmateFormatter, testName: string) =
-  cf.testStart = getMonoTime()
+  cf.testStart = checkmateRealMono()
   cf.emit(%*{"e": "testStarted", "test": testName})
 
 method failureOccurred(cf: CheckmateFormatter, checkpoints: seq[string],
@@ -35,7 +42,7 @@ method failureOccurred(cf: CheckmateFormatter, checkpoints: seq[string],
   cf.emit(%*{"e": "failure", "checkpoints": checkpoints, "stack": stackTrace})
 
 method testEnded(cf: CheckmateFormatter, testResult: TestResult) =
-  let durMs = (getMonoTime() - cf.testStart).inNanoseconds.float / 1e6
+  let durMs = (checkmateRealMono() - cf.testStart).inNanoseconds.float / 1e6
   cf.emit(%*{"e": "testEnded", "suite": testResult.suiteName,
              "test": testResult.testName, "status": $testResult.status,
              "durMs": durMs})

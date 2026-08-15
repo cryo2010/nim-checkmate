@@ -44,18 +44,34 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   var ptasks: seq[PoolTask]
   var extraFlags = if cfg.covEnabled: covCompileFlags() else: newSeq[string]()
   var farmOk = false
-  if not cfg.allowEmptyTests:
+  var timeOk = false
+  if not cfg.allowEmptyTests or cfg.timeTravel:
     let farm = prepareLibFarm(cfg)
     farmOk = farm.ok
+    timeOk = farm.timeOk
     if farm.ok:
       extraFlags.add "--lib:" & quoteShell(farm.dir)
     else:
       stderr.writeLine "checkmate: warning: " & farm.warning
+    if cfg.timeTravel and farm.ok and not farm.timeOk:
+      stderr.writeLine "checkmate: warning: " & farm.timeWarning
   var inProcessLoop = cfg.loopInProcess and cfg.loop > 1
   if inProcessLoop and not farmOk:
     stderr.writeLine "checkmate: warning: loop_in_process needs the unittest " &
       "overlay (unavailable here); falling back to process-level looping"
     inProcessLoop = false
+  let timeTravelActive = cfg.timeTravel and farmOk and timeOk
+  if cfg.timeTravel and not timeTravelActive and not farmOk:
+    stderr.writeLine "checkmate: warning: time travel disabled: the stdlib " &
+      "overlay could not be built"
+  var timeStartNs = 0'i64
+  if timeTravelActive:
+    timeStartNs =
+      if cfg.timeStart.len > 0:
+        parseTimeStartNs(cfg.timeStart)
+      else:
+        let now = getTime()
+        now.toUnix * 1_000_000_000'i64 + now.nanosecond
   for i, tf in files:
     let ct = buildCompileTask(cfg, tf, extraFlags)
     ctasks.add ct
@@ -104,6 +120,12 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
       var env = @[("CHECKMATE_EVENTS_FILE", evPath)]
       if inProcessLoop:
         env.add ("CHECKMATE_LOOP", $cfg.loop)
+      if timeTravelActive:
+        env.add ("CHECKMATE_TIME_TRAVEL", "1")
+        env.add ("CHECKMATE_TIME_START_NS", $timeStartNs)
+      if cfg.allowEmptyTests and farmOk:
+        # farm in use (time travel) but enforcement opted out at runtime
+        env.add ("CHECKMATE_ALLOW_EMPTY", "1")
       tasks.add PoolTask(
         id: meta.len, cmd: cmd,
         logPath: cfg.cacheDir / "logs" / files[fi].slug & "." & $iteration & ".log",
