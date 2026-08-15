@@ -54,7 +54,7 @@ checkmate list [paths...]              # print discovered test files
 | `-b`, `--bail` | stop on the first failing test file |
 | `--timeout SECS` | per-test-binary timeout (default 300; 0 disables) |
 | `-v`, `--verbose` | per-test result lines |
-| `--color auto\|always\|never` | color mode (`NO_COLOR` is honored) |
+| `--color auto\|always\|never` | color mode (`NO_COLOR` and `CI` are honored) |
 | `-n`, `--nimflags FLAG` | extra flags for `nim c`; repeatable |
 | `--coverage` | print a line-coverage table after the run |
 | `--min-lines N` | coverage gate: minimum percent, or max uncovered lines if negative |

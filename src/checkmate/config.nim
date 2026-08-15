@@ -64,12 +64,21 @@ proc parseColorMode*(s: string): ColorMode =
   of "never": cmNever
   else: raise newException(UsageError, "invalid color mode: '" & s & "' (expected auto|always|never)")
 
+proc autoColorAllowed*(isTty: bool; noColor, term, ci: string): bool =
+  ## The cmAuto decision, pure for testability. CI=false/0/empty does not
+  ## count as CI (some environments export CI=false to opt out).
+  if not isTty or noColor.len > 0 or term == "dumb":
+    return false
+  let ciNorm = ci.toLowerAscii
+  ciNorm.len == 0 or ciNorm in ["false", "0"]
+
 proc colorsEnabled*(cfg: Config): bool =
   case cfg.color
   of cmAlways: true
   of cmNever: false
   of cmAuto:
-    isatty(stdout) and getEnv("NO_COLOR").len == 0 and getEnv("TERM") != "dumb"
+    autoColorAllowed(isatty(stdout), getEnv("NO_COLOR"), getEnv("TERM"),
+                     getEnv("CI"))
 
 # --- TOML loading ---------------------------------------------------------
 

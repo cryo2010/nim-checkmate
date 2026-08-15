@@ -97,6 +97,18 @@ color = "never"
     expect UsageError:
       discard parseColorMode("sometimes")
 
+  test "auto color respects tty, NO_COLOR, TERM and CI":
+    check autoColorAllowed(true, "", "xterm-256color", "")
+    check not autoColorAllowed(false, "", "xterm-256color", "")
+    check not autoColorAllowed(true, "1", "xterm-256color", "")
+    check not autoColorAllowed(true, "", "dumb", "")
+    check not autoColorAllowed(true, "", "xterm-256color", "true")
+    check not autoColorAllowed(true, "", "xterm-256color", "1")
+    check not autoColorAllowed(true, "", "xterm-256color", "woodpecker")
+    # explicit CI opt-outs do not disable color
+    check autoColorAllowed(true, "", "xterm-256color", "false")
+    check autoColorAllowed(true, "", "xterm-256color", "0")
+
 suite "findProjectRoot":
   test "walks up to checkmate.toml":
     removeDir(tmpRoot)
