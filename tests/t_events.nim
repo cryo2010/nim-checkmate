@@ -51,6 +51,17 @@ suite "foldEvents":
     check o.tests[0].checkpoints == @["check failed"]
     check o.tests[0].stack == "tb"
 
+  test "helper-proc failure with OK status is repaired to FAILED":
+    # fail() outside the test body's scope cannot set testStatusIMPL
+    let evs = @[
+      Event(kind: ekTestStarted, test: "t"),
+      Event(kind: ekFailure, checkpoints: @["helper.nim(6, 9): Check failed: x > 0"]),
+      Event(kind: ekTestEnded, test: "t", status: "OK", durMs: 1),
+    ]
+    let o = foldEvents(evs, 1, false)
+    check o.tests[0].status == "FAILED"
+    check o.tests[0].checkpoints.len == 1
+
   test "bail abort: failure then cut-off reports FAILED, not crashed":
     let evs = @[
       Event(kind: ekTestStarted, test: "aborted"),

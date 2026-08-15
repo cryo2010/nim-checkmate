@@ -141,8 +141,14 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
           suite: openSuite, name: ToplevelName, status: "FAILED",
           checkpoints: ev.checkpoints, stack: ev.stack)
     of ekTestEnded:
+      var status = ev.status
+      if status == "OK" and pendingCheckpoints.len > 0:
+        # fail() inside a helper proc cannot see testStatusIMPL and only
+        # sets the program exit code; the failureOccurred event it emitted
+        # is authoritative, so the test DID fail
+        status = "FAILED"
       result.tests.add TestRun(
-        suite: ev.suite, name: ev.test, status: ev.status,
+        suite: ev.suite, name: ev.test, status: status,
         durMs: ev.durMs, checkpoints: pendingCheckpoints, stack: pendingStack)
       openTest = ""
       pendingCheckpoints = @[]

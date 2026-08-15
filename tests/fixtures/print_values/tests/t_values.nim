@@ -1,6 +1,7 @@
 # Both tests fail deliberately: this fixture exists to show what failing
 # checks PRINT under the overlay (repr fallback, value truncation).
 import std/[unittest, strutils]
+import ./helper
 
 type Point = object
   x, y: int
@@ -36,6 +37,9 @@ test "difference beyond the truncation window":
 
 test "seqs of different lengths":
   check @[1, 2, 3] == @[1, 2, 3, 4, 5]
+
+test "checks in helper files show their own file":
+  assertPositive(-5)
 
 test "multiline strings keep the diff window on one line":
   let expected = "line one\nline two\nline three\nline four\nline five\n".repeat(2)

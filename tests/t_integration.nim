@@ -226,6 +226,11 @@ suite "check output enrichment":
     check "strings differ at index 1500 (lengths 2000 and 2000, 2 differing positions)" in output
     check "brownZfoxZjumps" in output
     check "^   ^" in output   # carets under BOTH divergence columns
+    # checks failing inside helper modules show filename:line (and are not
+    # silently swallowed by the testStatusIMPL scoping quirk)
+    check "tests/helper.nim:6  x > 0" in output
+    check "x was -5" in output
+    check "0/8 passed" in output
     # newlines render as single-column placeholders inside diff windows
     check "fiveXline one" & "␤" & "line two" in output
     check "five" & "␤" & "line one" in output

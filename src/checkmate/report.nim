@@ -98,12 +98,17 @@ proc indented(text: string, prefix: string): string =
   lines.join("\n")
 
 proc headerRewrite(cp, relPath: string): (bool, string) =
-  ## "relPath(line, col): [Check failed: ]expr" becomes "line:  expr".
-  ## Only for checkpoints pointing at the file already named in the FAIL
-  ## header; checks failing inside other modules keep their full path.
-  if not cp.startsWith(relPath & "("):
+  ## "path(line, col): [Check failed: ]expr" becomes "line:  expr" when
+  ## path is the file already named in the FAIL header, and
+  ## "path:line  expr" when the check failed in another module (helper
+  ## procs), so the line number is never attributed to the wrong file.
+  let open = cp.find('(')
+  if open <= 0:
     return (false, "")
-  var idx = relPath.len + 1
+  let path = cp[0 ..< open]
+  if not path.endsWith(".nim"):
+    return (false, "")
+  var idx = open + 1
   var lineNum = ""
   while idx < cp.len and cp[idx] in {'0' .. '9'}:
     lineNum.add cp[idx]
@@ -122,7 +127,10 @@ proc headerRewrite(cp, relPath: string): (bool, string) =
   const checkPrefix = "Check failed: "
   if rest.startsWith(checkPrefix):
     rest = rest[checkPrefix.len .. ^1]
-  (true, lineNum & ":  " & rest)
+  if path == relPath:
+    (true, lineNum & ":  " & rest)
+  else:
+    (true, path & ":" & lineNum & "  " & rest)
 
 proc capturedOutputBlock(r: Reporter, fo: FileOutcome) =
   for run in fo.runs:
