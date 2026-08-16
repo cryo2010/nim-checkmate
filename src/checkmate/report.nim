@@ -1,7 +1,7 @@
 ## Jest-like terminal rendering: streamed per-file result lines, failure
 ## detail blocks, and the closing summary.
 
-import std/[os, strutils]
+import std/[os, strutils, tables]
 import ./config, ./events
 
 type
@@ -167,6 +167,26 @@ proc headerRewrite(cp, relPath: string): HeaderParts =
   if path != relPath:
     result.path = path
 
+proc sourceLine(r: Reporter, cache: var Table[string, seq[string]],
+                relPath, num: string): string =
+  ## The verbatim source line (original indentation, full statement) for a
+  ## gutter header; "" when the file or line is unavailable.
+  if relPath notin cache:
+    let p = r.rootPrefix & relPath
+    cache[relPath] =
+      if fileExists(p):
+        try: readFile(p).splitLines
+        except IOError: @[]
+      else:
+        @[]
+  var idx = -1
+  try:
+    idx = parseInt(num) - 1
+  except ValueError:
+    discard
+  if idx >= 0 and idx < cache[relPath].len:
+    result = cache[relPath][idx]
+
 proc stackLineNum(stack, relPath: string): string =
   ## Line number of the most recent frame in relPath ("path(N) proc"),
   ## used to give exception failures a line-number header like checks have.
@@ -199,6 +219,7 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     let content = if fileExists(fo.compileLog): readFile(fo.compileLog) else: ""
     echo indented(r.relativize(content.strip(leading = false)), "  ")
     return
+  var srcCache = initTable[string, seq[string]]()
   # gutter width: right-align line numbers across this file's whole block
   var numW = 0
   for t in aggregateTests(fo):
@@ -239,17 +260,25 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
       if not headerRewrite(r.relativize(cps[0]), fo.tf.relPath).isHeader:
         let lineNum = stackLineNum(r.relativize(f.stack), fo.tf.relPath)
         if lineNum.len > 0:
-          echo cpIndent, r.dim(align(lineNum, numW) & " |"), " ",
-               r.relativize(cps[0])
-          cps = cps[1 .. ^1]
+          let src = r.sourceLine(srcCache, fo.tf.relPath, lineNum)
+          if src.len > 0:
+            # show the raise-site code; the exception message nests below
+            echo cpIndent, r.dim(align(lineNum, numW) & " |"), " ", src
+          else:
+            echo cpIndent, r.dim(align(lineNum, numW) & " |"), " ",
+                 r.relativize(cps[0])
+            cps = cps[1 .. ^1]
     for cp in cps:
       let rcp = r.relativize(cp)
       let h = headerRewrite(rcp, fo.tf.relPath)
       if h.isHeader and h.path.len == 0:
-        echo cpIndent, r.dim(align(h.num, numW) & " |"), " ", h.rest
+        let src = r.sourceLine(srcCache, fo.tf.relPath, h.num)
+        echo cpIndent, r.dim(align(h.num, numW) & " |"), " ",
+             (if src.len > 0: src else: h.rest)
       elif h.isHeader:
+        let src = r.sourceLine(srcCache, h.path, h.num)
         echo cpIndent, r.dim(shortenPath(h.path, r.maxPath) & ":" & h.num & " |"),
-             " ", h.rest
+             " ", (if src.len > 0: src else: h.rest)
       else:
         echo indented(rcp, cpIndent & "  ")  # values nest under their header
     if f.stack.strip.len > 0:
