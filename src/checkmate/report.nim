@@ -98,18 +98,22 @@ proc fileLine*(r: Reporter, fo: FileOutcome) =
     note = r.dim("(" & fmtSecs(median(durs)) & ")")
   echo r.badge(fs), " ", shortenPath(fo.tf.relPath, r.maxPath), " ", note
   if r.verbose and fs in {fsPass, fsFail, fsFlaky}:
+    var currentSuite = "\0"  # sentinel: no suite announced yet
     for t in aggregateTests(fo):
+      if t.suite != currentSuite:
+        currentSuite = t.suite
+        if t.suite.len > 0:
+          echo "  ", r.bold(shortenName(t.suite, r.maxSuite))
+      let base = if t.suite.len > 0: "    " else: "  "
       let n = t.passes + t.fails + t.skips
       let mark =
         if t.fails > 0 and t.passes > 0: r.yellow("~")
-        elif t.fails > 0: r.red("x")
-        elif t.skips == n: r.dim("-")
-        else: r.green("+")
-      var title = shortenName(t.name, r.maxTest)
-      if t.suite.len > 0:
-        title = shortenName(t.suite, r.maxSuite) & " > " & title
-      var line = "  " & mark & " " & title
-      if t.durationsMs.len > 0: line.add " " & r.dim("(" & fmtMs(median(t.durationsMs)) & ")")
+        elif t.fails > 0: r.red("✗")
+        elif t.skips == n: r.yellow("○")
+        else: r.green("✓")
+      var line = base & mark & " " & r.dim(shortenName(t.name, r.maxTest))
+      if t.durationsMs.len > 0:
+        line.add " " & r.dim("(" & fmtMs(median(t.durationsMs)) & ")")
       if t.fails > 0 and t.passes > 0:
         line.add " " & r.yellow("[flaky: passed " & $t.passes & "/" & $n & "]")
       echo line

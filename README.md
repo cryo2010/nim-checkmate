@@ -57,7 +57,7 @@ checkmate list [paths...]              # print discovered test files
 | `-j`, `--jobs N` | parallel workers (default: CPU cores) |
 | `-b`, `--bail` | stop everything at the first failing test (aborts mid-file) |
 | `--timeout SECS` | seconds a single test may run (default 300; 0 disables) |
-| `-v`, `--verbose` | per-test result lines |
+| `-v`, `--verbose` | per-test result lines: ✓/○/✗ marks, suite grouping, timings |
 | `--color auto\|always\|never` | color mode (`NO_COLOR` and `CI` are honored) |
 | `-n`, `--nimflags FLAG` | extra flags for `nim c`; repeatable |
 | `--coverage` | print a line-coverage table after the run |

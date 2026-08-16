@@ -236,6 +236,17 @@ suite "check output enrichment":
     check "five" & "␤" & "line one" in output
     check "lengths differ: 3 vs 5" in output
 
+suite "verbose listing":
+  test "marks, suite grouping, and timings":
+    let (output, code) = cm("passing", "-v")
+    check code == 0
+    check "\n  math ops\n" in output          # suite heading above its tests
+    check "✓ addition works (" in output      # pass mark + timing
+    check "✓ bare test passes (" in output    # standalone test, flat layout
+    check "○ skipped one (" in output         # skip mark
+    let (failOut, _) = cm("failing", "-v")
+    check "✗ wrong sum (" in failOut          # fail mark
+
 suite "path display":
   test "long relative paths shorten with preceding ellipsis":
     let (output, code) = cm("long_names")
