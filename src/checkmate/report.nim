@@ -126,29 +126,34 @@ proc indented(text: string, prefix: string): string =
     lines.add prefix & line
   lines.join("\n")
 
-proc headerRewrite(cp, relPath: string, pathCap: int): (bool, string) =
-  ## "path(line, col): [Check failed: ]expr" becomes "line:  expr" when
-  ## path is the file already named in the FAIL header, and
-  ## "path:line  expr" when the check failed in another module (helper
-  ## procs), so the line number is never attributed to the wrong file.
+type HeaderParts = object
+  isHeader: bool
+  path: string   # "" when the checkpoint points at the reported file
+  num: string
+  rest: string
+
+proc headerRewrite(cp, relPath: string): HeaderParts =
+  ## Splits "path(line, col): [Check failed: ]expr" into parts; path is
+  ## kept only when the check failed in another module (helper procs), so
+  ## the line number is never attributed to the wrong file.
   let open = cp.find('(')
   if open <= 0:
-    return (false, "")
+    return
   let path = cp[0 ..< open]
   if not path.endsWith(".nim"):
-    return (false, "")
+    return
   var idx = open + 1
   var lineNum = ""
   while idx < cp.len and cp[idx] in {'0' .. '9'}:
     lineNum.add cp[idx]
     inc idx
   if lineNum.len == 0 or idx >= cp.len or cp[idx] != ',':
-    return (false, "")
+    return
   inc idx
   while idx < cp.len and cp[idx] in {' ', '0' .. '9'}:
     inc idx
   if idx + 1 >= cp.len or cp[idx] != ')' or cp[idx + 1] != ':':
-    return (false, "")
+    return
   idx += 2
   while idx < cp.len and cp[idx] == ' ':
     inc idx
@@ -156,10 +161,11 @@ proc headerRewrite(cp, relPath: string, pathCap: int): (bool, string) =
   const checkPrefix = "Check failed: "
   if rest.startsWith(checkPrefix):
     rest = rest[checkPrefix.len .. ^1]
-  if path == relPath:
-    (true, lineNum & ":  " & rest)
-  else:
-    (true, shortenPath(path, pathCap) & ":" & lineNum & "  " & rest)
+  result.isHeader = true
+  result.num = lineNum
+  result.rest = rest
+  if path != relPath:
+    result.path = path
 
 proc stackLineNum(stack, relPath: string): string =
   ## Line number of the most recent frame in relPath ("path(N) proc"),
@@ -193,6 +199,18 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     let content = if fileExists(fo.compileLog): readFile(fo.compileLog) else: ""
     echo indented(r.relativize(content.strip(leading = false)), "  ")
     return
+  # gutter width: right-align line numbers across this file's whole block
+  var numW = 0
+  for t in aggregateTests(fo):
+    if t.failures.len == 0: continue
+    let f = t.failures[0]
+    for i, cp in f.checkpoints:
+      let h = headerRewrite(r.relativize(cp), fo.tf.relPath)
+      if h.isHeader:
+        if h.path.len == 0:
+          numW = max(numW, h.num.len)
+      elif i == 0:
+        numW = max(numW, stackLineNum(r.relativize(f.stack), fo.tf.relPath).len)
   var currentSuite = "\0"  # sentinel: no suite announced yet
   for t in aggregateTests(fo):
     if t.failures.len == 0: continue
@@ -217,19 +235,21 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     var cps = f.checkpoints
     if cps.len > 0:
       # exception failures have no lineinfo'd checkpoint; derive a header
-      # from the stack so every failure gets a "line:" anchor
-      let (firstIsHeader, _) = headerRewrite(r.relativize(cps[0]),
-                                             fo.tf.relPath, r.maxPath)
-      if not firstIsHeader:
+      # from the stack so every failure gets a line-number anchor
+      if not headerRewrite(r.relativize(cps[0]), fo.tf.relPath).isHeader:
         let lineNum = stackLineNum(r.relativize(f.stack), fo.tf.relPath)
         if lineNum.len > 0:
-          echo indented(lineNum & ":  " & r.relativize(cps[0]), cpIndent)
+          echo cpIndent, r.dim(align(lineNum, numW) & " |"), " ",
+               r.relativize(cps[0])
           cps = cps[1 .. ^1]
     for cp in cps:
       let rcp = r.relativize(cp)
-      let (isHeader, formatted) = headerRewrite(rcp, fo.tf.relPath, r.maxPath)
-      if isHeader:
-        echo indented(formatted, cpIndent)
+      let h = headerRewrite(rcp, fo.tf.relPath)
+      if h.isHeader and h.path.len == 0:
+        echo cpIndent, r.dim(align(h.num, numW) & " |"), " ", h.rest
+      elif h.isHeader:
+        echo cpIndent, r.dim(shortenPath(h.path, r.maxPath) & ":" & h.num & " |"),
+             " ", h.rest
       else:
         echo indented(rcp, cpIndent & "  ")  # values nest under their header
     if f.stack.strip.len > 0:

@@ -12,7 +12,7 @@ detection, and line coverage.
  FAIL  tests/t_math.nim
   ● math ops
     ✗ addition works
-      12:  a + b == 5
+      12 | a + b == 5
         a + b was 4
 
 suites: 1/3 passed (1 failed, 1 flaky)
@@ -187,7 +187,7 @@ with windowed excerpts around it, and seqs/arrays report the first
 mismatching index and elements:
 
 ```
-100:  lhs == rhs
+100 | lhs == rhs
   strings differ at index 100 (lengths 201 and 201, 1 differing position)
     lhs: ...aaaaaaaaaaaaaaaXaaaaaaaaaaaaaaaaaaaaaaaa...
     rhs: ...aaaaaaaaaaaaaaaYaaaaaaaaaaaaaaaaaaaaaaaa...
@@ -207,7 +207,7 @@ short-circuiting skipped, with guarded expressions never evaluated
 speculatively:
 
 ```
-18:  conn != nil and conn.port == 443
+18 | conn != nil and conn.port == 443
   conn was nil
   conn != nil was false
   conn.port was not evaluated
