@@ -3,7 +3,7 @@
 ## Subcommands: run (default), init, list. Bare `checkmate` or
 ## `checkmate tests/foo` dispatches to run, jest-style.
 
-import std/os
+import std/[os, tables]
 import cligen
 import checkmate/[config, coverage, discovery, events, runner, report]
 
@@ -16,6 +16,41 @@ proc applyChdir(chdir: string) =
       raise newException(UsageError, "no such directory: " & chdir)
     setCurrentDir(chdir)
 
+proc runGroup(root: string; paths, filter: seq[string];
+              loop, jobs: int; bail: bool; timeout: int; verbose: bool;
+              color: string; nimflags: seq[string];
+              coverage, passWithNoTests, allowEmptyTests: bool;
+              minLines: float; loopInProcess, timeTravel: bool;
+              timeStart: string): int =
+  ## One project's discover-compile-run cycle with its own config and cache.
+  var cfg = loadConfig(root)
+  cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
+               passWithNoTests, allowEmptyTests, minLines, loopInProcess,
+               timeTravel, timeStart)
+  let rep = newReporter(cfg, filtered = filter.len > 0)
+  let summary = runOnce(cfg, paths, filter, rep)
+  if summary.files.len == 0:
+    stderr.writeLine "checkmate: no test files found (dirs: " &
+      $cfg.dirs & ", pattern: " & cfg.pattern & ")"
+    return exitCodeFor(summary, cfg.passWithNoTests)
+  rep.finish(summary)
+  var covGate = ""
+  if cfg.covEnabled:
+    covGate = covGateFailure(cfg, covReport(cfg))
+  elif cfg.covMinLines != 0:
+    stderr.writeLine "checkmate: warning: coverage.min_lines is set " &
+      "but coverage is not enabled"
+  if cfg.timeStart.len > 0 and not cfg.timeTravel:
+    stderr.writeLine "checkmate: warning: time_start is set " &
+      "but time_travel is not enabled"
+  result = exitCodeFor(summary, cfg.passWithNoTests)
+  if covGate.len > 0:
+    stderr.writeLine "checkmate: " & covGate
+    if result == 0: result = 1
+  if result != 0 and totalTestsRun(summary) == 0 and not summary.bailed:
+    stderr.writeLine "checkmate: failing because no tests were run " &
+      "(use --pass-with-no-tests to allow this)"
+
 proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
            loop = 0; jobs = 0; bail = false; timeout = -1;
            verbose = false; color = ""; nimflags: seq[string] = @[];
@@ -26,33 +61,28 @@ proc cmRun(paths: seq[string] = @[]; filter: seq[string] = @[];
   ## Discover, compile, and run std/unittest test files.
   try:
     applyChdir(chdir)
-    var cfg = loadConfig(findProjectRoot(getCurrentDir()))
-    cfg.mergeCli(loop, jobs, timeout, bail, verbose, coverage, color, nimflags,
-                 passWithNoTests, allowEmptyTests, minLines, loopInProcess,
-                 timeTravel, timeStart)
-    let rep = newReporter(cfg, filtered = filter.len > 0)
-    let summary = runOnce(cfg, paths, filter, rep)
-    if summary.files.len == 0:
-      stderr.writeLine "checkmate: no test files found (dirs: " &
-        $cfg.dirs & ", pattern: " & cfg.pattern & ")"
-      return exitCodeFor(summary, cfg.passWithNoTests)
-    rep.finish(summary)
-    var covGate = ""
-    if cfg.covEnabled:
-      covGate = covGateFailure(cfg, covReport(cfg))
-    elif cfg.covMinLines != 0:
-      stderr.writeLine "checkmate: warning: coverage.min_lines is set " &
-        "but coverage is not enabled"
-    if cfg.timeStart.len > 0 and not cfg.timeTravel:
-      stderr.writeLine "checkmate: warning: time_start is set " &
-        "but time_travel is not enabled"
-    result = exitCodeFor(summary, cfg.passWithNoTests)
-    if covGate.len > 0:
-      stderr.writeLine "checkmate: " & covGate
-      if result == 0: result = 1
-    if result != 0 and totalTestsRun(summary) == 0 and not summary.bailed:
-      stderr.writeLine "checkmate: failing because no tests were run " &
-        "(use --pass-with-no-tests to allow this)"
+    let cwdRoot = findProjectRoot(getCurrentDir())
+    # positional paths resolve their OWN project root (nearest
+    # checkmate.toml walking up from the file), so a file inside a nested
+    # project runs under that project's config and cache without -C
+    var groups = initOrderedTable[string, seq[string]]()
+    if paths.len == 0:
+      groups[cwdRoot] = @[]
+    else:
+      for p in paths:
+        let start =
+          if fileExists(p): parentDir(absolutePath(p))
+          elif dirExists(p): absolutePath(p)
+          else: raise newException(UsageError, "no such file or directory: " & p)
+        groups.mgetOrPut(findFileProjectRoot(start, cwdRoot), @[]).add p
+    for root, groupPaths in groups:
+      if root != cwdRoot:
+        stderr.writeLine "checkmate: note: using project at " &
+          relativePath(root, getCurrentDir()) & " (nearest " & ConfigFileName &
+          " to " & groupPaths[0] & ")"
+      result = max(result, runGroup(root, groupPaths, filter, loop, jobs,
+        bail, timeout, verbose, color, nimflags, coverage, passWithNoTests,
+        allowEmptyTests, minLines, loopInProcess, timeTravel, timeStart))
   except UsageError as e:
     stderr.writeLine "checkmate: " & e.msg
     result = 2

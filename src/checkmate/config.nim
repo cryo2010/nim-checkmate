@@ -67,6 +67,19 @@ proc findProjectRoot*(startDir: string): string =
       return absolutePath(startDir)
     dir = parent
 
+proc findFileProjectRoot*(startDir, fallback: string): string =
+  ## Nearest directory at or above startDir containing checkmate.toml, so a
+  ## positional test file belonging to a nested project runs under that
+  ## project's config and cache; fallback when none is found.
+  var dir = absolutePath(startDir)
+  while true:
+    if fileExists(dir / ConfigFileName):
+      return dir
+    let parent = parentDir(dir)
+    if parent == dir or parent.len == 0:
+      return fallback
+    dir = parent
+
 proc parseColorMode*(s: string): ColorMode =
   case s.toLowerAscii
   of "auto": cmAuto

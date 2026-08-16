@@ -50,7 +50,7 @@ checkmate list [paths...]              # print discovered test files
 
 | Option | Meaning |
 | --- | --- |
-| `paths...` | test files (verbatim) or directories (walked with the filename pattern) |
+| `paths...` | test files (verbatim) or directories (walked with the filename pattern); each resolves its own project root (nearest `checkmate.toml`), so files in nested projects run under their own config and cache |
 | `-C`, `--chdir DIR` | run as if started in DIR (git-style) |
 | `-t`, `--filter PAT` | run tests whose name starts or ends with PAT; repeatable (OR'd) |
 | `-l`, `--loop N` | run the whole suite N times to catch flaky tests |
