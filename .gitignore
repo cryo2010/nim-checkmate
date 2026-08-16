@@ -2,6 +2,7 @@
 .checkmate/
 tests/fixtures/flaky/flake_marker
 tests/fixtures/spawner/child.pid
+examples/readme_demo/net_counter
 nimcache/
 tests/t_*
 !tests/t_*.nim

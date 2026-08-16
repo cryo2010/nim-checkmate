@@ -1,0 +1,4 @@
+# Demo project behind the example run in the top-level README.
+# Run ./run.sh (or `checkmate --color:never --loop:10 --jobs:1`) here.
+[tests]
+dirs = ["tests"]
