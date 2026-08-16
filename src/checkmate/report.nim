@@ -161,6 +161,20 @@ proc headerRewrite(cp, relPath: string, pathCap: int): (bool, string) =
   else:
     (true, shortenPath(path, pathCap) & ":" & lineNum & "  " & rest)
 
+proc stackLineNum(stack, relPath: string): string =
+  ## Line number of the most recent frame in relPath ("path(N) proc"),
+  ## used to give exception failures a line-number header like checks have.
+  for ln in stack.splitLines:
+    let l = ln.strip
+    if l.startsWith(relPath & "("):
+      var i = relPath.len + 1
+      var num = ""
+      while i < l.len and l[i] in {'0' .. '9'}:
+        num.add l[i]
+        inc i
+      if num.len > 0 and i < l.len and l[i] == ')':
+        result = num   # keep scanning: tracebacks list most recent last
+
 proc capturedOutputBlock(r: Reporter, fo: FileOutcome) =
   for run in fo.runs:
     if run.iterFailed:
@@ -197,9 +211,21 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     of "TIMEOUT": suffix = " " & r.red("(timed out)")
     else:
       if t.passes > 0: suffix = " " & r.yellow("(flaky: failed " & $t.fails & "/" & $n & ")")
-    echo base, r.red(shortenName(t.name, r.maxTest)), suffix
+    let nameMark = if t.passes > 0: r.yellow("~") else: r.red("✗")
+    echo base, nameMark, " ", r.red(shortenName(t.name, r.maxTest)), suffix
     let f = t.failures[0]
-    for cp in f.checkpoints:
+    var cps = f.checkpoints
+    if cps.len > 0:
+      # exception failures have no lineinfo'd checkpoint; derive a header
+      # from the stack so every failure gets a "line:" anchor
+      let (firstIsHeader, _) = headerRewrite(r.relativize(cps[0]),
+                                             fo.tf.relPath, r.maxPath)
+      if not firstIsHeader:
+        let lineNum = stackLineNum(r.relativize(f.stack), fo.tf.relPath)
+        if lineNum.len > 0:
+          echo indented(lineNum & ":  " & r.relativize(cps[0]), cpIndent)
+          cps = cps[1 .. ^1]
+    for cp in cps:
       let rcp = r.relativize(cp)
       let (isHeader, formatted) = headerRewrite(rcp, fo.tf.relPath, r.maxPath)
       if isHeader:

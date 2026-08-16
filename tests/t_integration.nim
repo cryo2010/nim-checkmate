@@ -34,6 +34,10 @@ suite "fixture runs":
     check "● broken" in output   # suite heading above its failing tests
     check "\n      7:  a + b == 5" in output      # file dropped: it's in the FAIL header
     check "\n        a + b was 4" in output       # values nest under the check line
+    check "✗ wrong sum" in output                 # failing tests carry a mark
+    check "✗ raises" in output
+    # exception failures derive a line header from the stack
+    check "\n      9:  Unhandled exception: boom [ValueError]" in output
     check "a + b was 4" in output
     check "suites: 1/2 passed (1 failed)" in output
     check "tests:  2/4 passed (2 failed)" in output

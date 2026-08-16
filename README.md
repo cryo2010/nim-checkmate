@@ -11,7 +11,7 @@ detection, and line coverage.
 
  FAIL  tests/t_math.nim
   ● math ops
-    addition works
+    ✗ addition works
       12:  a + b == 5
         a + b was 4
 
@@ -163,7 +163,7 @@ fails:
 ```
  FAIL  tests/t_api.nim
   ● users
-    fetches the profile
+    ✗ fetches the profile
       Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)
 ```
 
