@@ -1,0 +1,5 @@
+# slim_system fixture: nimPreviewSlimSystem removes File/open/writeLine
+# from the auto-imported system. The injected formatter uses them, so this
+# proves checkmate's inject module compiles under slim system.
+[compile]
+defines = ["nimPreviewSlimSystem"]

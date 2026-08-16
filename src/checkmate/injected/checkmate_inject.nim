@@ -14,6 +14,8 @@
 # protocol here is mirrored by checkmate/events.nim.
 
 import std/[unittest, os, json, monotimes, times]
+when defined(nimPreviewSlimSystem):
+  import std/syncio  # File/open/writeLine/flushFile leave system under slim
 
 type CheckmateFormatter = ref object of OutputFormatter
   f: File

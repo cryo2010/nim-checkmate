@@ -301,6 +301,14 @@ suite "fixture runs":
     check code == 0
     check "min_lines is set but coverage is not enabled" in output
 
+  test "inject module compiles under nimPreviewSlimSystem":
+    # slim system removes File/open/writeLine from the auto-imported
+    # system; the injected formatter must still compile
+    let (output, code) = cm("slim_system")
+    check code == 0
+    check "compile failed" notin output
+    check "1/1 passed" in output
+
   test "empty test fails by default":
     let (output, code) = cm("empty_test")
     check code == 1
