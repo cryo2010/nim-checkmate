@@ -38,3 +38,11 @@ jobs:
 
       - name: Dogfood (checkmate runs its own suite)
         run: ./checkmate --color:never
+
+      - name: Coverage diagnostics (on failure)
+        if: failure()
+        run: |
+          ./checkmate --color:never -C tests/fixtures/covered || true
+          echo "--- gcda files ---"
+          ls tests/fixtures/covered/.checkmate/nimcache/*/ | grep -c gcda || true
+          gcov --version | head -1 || true
