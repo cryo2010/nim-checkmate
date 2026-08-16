@@ -1,27 +1,13 @@
 # checkmate
 
+[![CI](https://github.com/cryo2010/nim-checkmate/actions/workflows/ci.yml/badge.svg)](https://github.com/cryo2010/nim-checkmate/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A test runner for Nim, inspired by [jest](https://jestjs.io/). The CLI discovers,
 compiles, and runs your unmodified `std/unittest` files in parallel, with advanced
 features like flake detection, line coverage and time travel.
 
-```
- PASS  tests/t_config.nim (0.70 s)
- FAIL  tests/t_math.nim (0.51 s)
- FLAKY tests/t_net.nim (passed 8/10)
-
- FAIL  tests/t_math.nim
-  ● math ops
-    ✗ addition works
-        10 |   test "addition works":
-        11 |     let (a, b) = (2, 2)
-      > 12 |     check a + b == 5
-        13 |
-        a + b was 4
-
-suites: 1/3 passed (1 failed, 1 flaky)
-tests:  14/17 passed (2 failed, 1 flaky)
-time:   1.31 s
-```
+<img src="docs/screenshot.png" alt="checkmate CLI output" width="100%">
 
 ## Install
 
