@@ -1,6 +1,7 @@
 # Nearly all tests fail deliberately: this fixture showcases power-assert
 # output for boolean connectives (which stock unittest does not decompose
-# at all). The final test PASSES to prove == operands evaluate only once.
+# at all). Two tests PASS on purpose: the typedesc-operand compile
+# regression and the ==-operands-evaluate-once proof.
 import std/unittest
 
 type User = object
@@ -45,6 +46,18 @@ test "sized-int literals unify inside boolean chains":
   # verbatim so the literal adapts to uint8
   let flags: uint8 = 0b101
   check (flags and 1'u8) == 0 and true
+
+type Rec = object
+type Alias = Rec
+
+test "typedesc operands in boolean chains compile":
+  # PASSES; regression: `is`/`isnot` operands may be typedescs, which the
+  # instrumentation must not wrap as runtime values
+  check Alias is object and not (Alias is tuple)
+
+test "is comparisons decompose inside boolean chains":
+  let version = 3
+  check version is string or false
 
 var evals = 0
 proc bumped(): uint8 =

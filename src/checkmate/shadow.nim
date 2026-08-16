@@ -23,7 +23,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 13
+const OverlayVersion = 14
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -373,12 +373,18 @@ proc checkmateInstrument(n: NimNode, texts: var seq[string]): NimNode =
     newTree(nnkPrefix, n[0], checkmateInstrument(n[1], texts))
   elif checkmateIsInfixOf(n, checkmateCmpOps):
     let origTxt = n.repr
+    let typeLevel = $n[0] in ["is", "isnot"]
     var op1 = n[1]
     var op2 = n[2]
-    if not checkmateSkipOperand(op1):
-      op1 = checkmateWrapVal(op1, texts)
-    if $n[0] notin ["is", "isnot"] and not checkmateSkipOperand(op2):
-      op2 = checkmateWrapVal(op2, texts)
+    if not typeLevel:
+      # is/isnot operands stay untouched: either side may be a typedesc
+      # (`User is object`), which cannot be passed as a runtime value, and
+      # `is` folds at compile time without evaluating its operand anyway,
+      # so a recording wrapper would be dead code even for values
+      if not checkmateSkipOperand(op1):
+        op1 = checkmateWrapVal(op1, texts)
+      if not checkmateSkipOperand(op2):
+        op2 = checkmateWrapVal(op2, texts)
     texts.add origTxt
     if $n[0] == "==":
       # the recorder needs BOTH typed operands for diff windows, but the

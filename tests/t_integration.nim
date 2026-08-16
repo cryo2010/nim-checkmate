@@ -424,7 +424,12 @@ suite "power assert":
     # neighboring context frames)
     check "bumped() was 5" in output
     check "✗ side effects ran once" notin output
-    check "tests:  1/9 passed (8 failed)" in output
+    # is/isnot: typedesc operands must compile (passing test); the
+    # comparison outcome records, operands do not (`is` folds at compile
+    # time and never evaluates them)
+    check "✗ typedesc operands in boolean chains compile" notin output
+    check "version is string was false" in output
+    check "tests:  2/11 passed (9 failed)" in output
 
 suite "time travel":
   test "virtual sleeps finish in real milliseconds":
