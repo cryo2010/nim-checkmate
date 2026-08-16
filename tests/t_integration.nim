@@ -53,6 +53,12 @@ suite "fixture runs":
     let (_, code) = cm("passing", "-t zzz_no_such_test --pass-with-no-tests")
     check code == 0
 
+  test "consistently failing loops summarize instead of listing iterations":
+    let (output, code) = cm("failing", "--loop:3")
+    check code == 1
+    check "failed in all 3 iterations" in output
+    check "also failed in iteration" notin output
+
   test "loop detects flakes":
     removeFile(fixture("flaky") / "flake_marker")
     let (output, code) = cm("flaky", "--loop:4")
