@@ -17,6 +17,16 @@ doAssert fileExists(checkmateBin),
 proc fixture(name: string): string =
   projectRoot / "tests" / "fixtures" / name
 
+proc fixtureLine(name, relFile, needle: string): int =
+  ## 1-based line of the first occurrence of needle. Assertions derive
+  ## line numbers from fixture sources so editing a fixture (moving code,
+  ## adding comments) cannot silently break them.
+  let lines = readFile(fixture(name) / relFile).splitLines
+  for i, ln in lines:
+    if needle in ln:
+      return i + 1
+  doAssert false, "'" & needle & "' not found in " & relFile
+
 proc cm(fixtureName: string, args: string = ""): tuple[output: string, exitCode: int] =
   execCmdEx(quoteShell(checkmateBin) & " --color:never " & args,
             workingDir = fixture(fixtureName))
@@ -32,15 +42,18 @@ suite "fixture runs":
     let (output, code) = cm("failing")
     check code == 1
     check "● broken" in output   # suite heading above its failing tests
-    check ">  7 |     check a + b == 5" in output  # marked failing line
-    check " 5 |     let a = 2" in output           # muted context line
+    # line numbers derived from the fixture source, not hardcoded
+    let checkLn = fixtureLine("failing", "tests/t_bad.nim", "check a + b == 5")
+    let ctxLn = fixtureLine("failing", "tests/t_bad.nim", "let a = 2")
+    let raiseLn = fixtureLine("failing", "tests/t_bad.nim", "raise newException")
+    check ($checkLn & " |     check a + b == 5") in output  # marked failing line
+    check ($ctxLn & " |     let a = 2") in output           # muted context line
     check "\n        a + b was 4" in output       # values nest under the check line
     check "✗ wrong sum" in output                 # failing tests carry a mark
     check "✗ raises" in output
     # exception failures show the raise-site frame; the message nests below
-    check ">  9 |     raise newException(ValueError, \"boom\")" in output
+    check ($raiseLn & " |     raise newException(ValueError, \"boom\")") in output
     check "\n        Unhandled exception: boom [ValueError]" in output
-    check "a + b was 4" in output
     check "suites: 1/2 passed (1 failed)" in output
     check "tests:  2/4 passed (2 failed)" in output
 
@@ -276,7 +289,8 @@ suite "check output enrichment":
     # checks failing inside helper modules show filename:line (and are not
     # silently swallowed by the testStatusIMPL scoping quirk)
     check "tests/helper.nim:" in output          # foreign-file frame heading
-    check "6 |   check x > 0" in output          # gutter width is block-global
+    let helperLn = fixtureLine("print_values", "tests/helper.nim", "check x > 0")
+    check ($helperLn & " |   check x > 0") in output
     check "x was -5" in output
     check "0/8 passed" in output
     # newlines render as single-column placeholders inside diff windows
@@ -301,7 +315,11 @@ suite "path display":
     check code == 1
     check " ...nested/directory/structure/t_long.nim " in output
     check "tests/very/deeply" notin output   # prefix elided
-    check "> 4 |   check false" in output   # same-file frame still matches
+    # one place deliberately pins the ">" marker with alignment: gutter
+    # width is len($(line + context)) with the default context of 3
+    let ln = fixtureLine("long_names",
+      "tests/very/deeply/nested/directory/structure/t_long.nim", "check false")
+    check ("> " & align($ln, len($(ln + 3))) & " |   check false") in output
     # [format] caps from the fixture config (30/30/30)
     check "● this suite name is quite lo..." in output
     check "this test name is also exce..." in output
@@ -328,7 +346,9 @@ suite "power assert":
     check "conn.port == 443 was not evaluated" in output   # guard held
     check "code == 200 was false" in output
     check "code == 204 was false" in output                # or: all attempted
-    check "> 14 |   check user.age >= 18 and user.name.len > 0" in output
+    let ln = fixtureLine("power_assert", "tests/t_power.nim",
+                         "check user.age >= 18")
+    check ($ln & " |   check user.age >= 18 and user.name.len > 0") in output
     # Tier 2 diff windows compose with power-assert
     check "strings differ at index 100 (lengths 225 and 225, 1 differing position)" in output
     check "quick Qrown" in output
