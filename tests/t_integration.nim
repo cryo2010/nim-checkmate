@@ -415,6 +415,16 @@ suite "power assert":
     check "strings differ at index 100 (lengths 225 and 225, 1 differing position)" in output
     check "quick Qrown" in output
     check "first mismatch at index 2: 4 vs 3" in output
+    # sized-int literal unification: comparing inside a generic recorder
+    # used to bind the literal as int and fail to COMPILE (uint8 == int)
+    check "(flags and 1'u8) == 0 was false" in output
+    check "(flags and 1'u8) was 1" in output
+    # == operands must evaluate exactly once: "side effects ran once"
+    # PASSES, so it never gets a failure mark (its name may still show in
+    # neighboring context frames)
+    check "bumped() was 5" in output
+    check "✗ side effects ran once" notin output
+    check "tests:  1/9 passed (8 failed)" in output
 
 suite "time travel":
   test "virtual sleeps finish in real milliseconds":

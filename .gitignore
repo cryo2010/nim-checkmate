@@ -3,5 +3,7 @@
 tests/fixtures/flaky/flake_marker
 tests/fixtures/spawner/child.pid
 nimcache/
+tests/t_*
+!tests/t_*.nim
 .claude/settings.local.json
 *.gcov

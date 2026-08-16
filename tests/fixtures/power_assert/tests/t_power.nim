@@ -1,5 +1,6 @@
-# All tests fail deliberately: this fixture showcases power-assert output
-# for boolean connectives (which stock unittest does not decompose at all).
+# Nearly all tests fail deliberately: this fixture showcases power-assert
+# output for boolean connectives (which stock unittest does not decompose
+# at all). The final test PASSES to prove == operands evaluate only once.
 import std/unittest
 
 type User = object
@@ -37,3 +38,22 @@ test "seq diffs appear inside boolean chains":
   let want = @[1, 2, 3]
   let got = @[1, 2, 4]
   check got == want or false
+
+test "sized-int literals unify inside boolean chains":
+  # regression: comparing inside a generic recorder bound the literal 0 as
+  # int and uint8 == int failed to COMPILE; the comparison must be emitted
+  # verbatim so the literal adapts to uint8
+  let flags: uint8 = 0b101
+  check (flags and 1'u8) == 0 and true
+
+var evals = 0
+proc bumped(): uint8 =
+  inc evals
+  5'u8
+
+test "== records the failing operand from a side-effecting call":
+  check bumped() == 7 and true
+
+test "side effects ran once":
+  # PASSES: the let-bound == operand above must evaluate exactly once
+  check evals == 1

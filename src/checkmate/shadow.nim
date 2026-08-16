@@ -23,7 +23,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 12
+const OverlayVersion = 13
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -318,11 +318,14 @@ proc checkmateRecordVal*[T](val: T, exprText: string): T =
     checkmateRecords.add((exprText, "<unprintable>"))
   val
 
-proc checkmateRecordEqResult*[A; B](a: A, b: B, cmpTxt: string): bool =
+proc checkmateRecordEqOutcome*[A; B](res: bool, a: A, b: B, cmpTxt: string): bool =
   ## Records an == comparison's result and, on mismatch, defers the Tier 2
-  ## diff lines into the record stream (text "" marks a raw line). Deferral
-  ## matters: a failing == inside a passing `or` chain must stay silent.
-  result = a == b
+  ## diff lines into the record stream (text "" marks a raw line). The
+  ## comparison itself happens at the CALL SITE, never in here: a generic
+  ## `a == b` would bind a literal operand as int and fail to compile
+  ## against sized types (`x == 0` with x: uint8). Deferral matters: a
+  ## failing == inside a passing `or` chain must stay silent.
+  result = res
   checkmateRecords.add((cmpTxt, $result))
   if not result:
     for checkmateLine in checkmateDiffLines(a, b):
@@ -344,6 +347,15 @@ proc checkmateSkipOperand(n: NimNode): bool =
     return true
   if n.kind == nnkIdent and $n in ["true", "false", "nil"]: return true
   false
+
+proc checkmateVerbatimOperand(n: NimNode): bool =
+  ## Effect-free nodes that may be REPEATED verbatim in generated code.
+  ## Repeating matters for ==: a raw literal keeps its flexible type and
+  ## unifies against the other side (`x == 0` with x: uint8), while a
+  ## let-bound copy would harden to int. Constructors like @[...] are
+  ## skip-operands but NOT verbatim: their elements may have effects.
+  n.kind in nnkLiterals or
+    (n.kind == nnkIdent and $n in ["true", "false", "nil"])
 
 proc checkmateWrapVal(n: NimNode, texts: var seq[string]): NimNode =
   let txt = n.repr
@@ -369,8 +381,26 @@ proc checkmateInstrument(n: NimNode, texts: var seq[string]): NimNode =
       op2 = checkmateWrapVal(op2, texts)
     texts.add origTxt
     if $n[0] == "==":
-      # dedicated recorder captures BOTH typed operands for diff windows
-      newCall(bindSym"checkmateRecordEqResult", op1, op2, newLit(origTxt))
+      # the recorder needs BOTH typed operands for diff windows, but the
+      # comparison must be emitted VERBATIM here so a literal operand still
+      # unifies against the other side's type. Verbatim-safe nodes repeat;
+      # everything else is let-bound once (single evaluation; the RecordVal
+      # wrapper inside the binding records the operand exactly once)
+      var stmts = newStmtList()
+      var aRef = op1
+      var bRef = op2
+      if not checkmateVerbatimOperand(n[1]):
+        let cmA = genSym(nskLet, "checkmateEqA")
+        stmts.add newLetStmt(cmA, op1)
+        aRef = cmA
+      if not checkmateVerbatimOperand(n[2]):
+        let cmB = genSym(nskLet, "checkmateEqB")
+        stmts.add newLetStmt(cmB, op2)
+        bRef = cmB
+      stmts.add newCall(bindSym"checkmateRecordEqOutcome",
+                        newTree(nnkInfix, n[0], aRef, bRef),
+                        aRef, bRef, newLit(origTxt))
+      newTree(nnkBlockStmt, newEmptyNode(), stmts)
     else:
       let cmpNode = newTree(nnkInfix, n[0], op1, op2)
       newCall(bindSym"checkmateRecordVal", cmpNode, newLit(origTxt))
