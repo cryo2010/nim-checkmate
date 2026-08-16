@@ -46,9 +46,11 @@ proc parseGcovFile(path: string, into: var CovLines, projectRoot, cacheDir: stri
       if not isAbsolute(source):
         source = projectRoot / source
       source = normalizedPath(source)
-      # only project sources; never the cache (inject module, generated files)
+      # only project sources that actually exist; never the cache, and never
+      # nim codegen pseudo-files like "generated_not_to_break_here"
       keep = source.startsWith(projectRoot & $DirSep) and
-             not source.startsWith(cacheDir & $DirSep)
+             not source.startsWith(cacheDir & $DirSep) and
+             fileExists(source)
       if keep and not into.hasKey(source):
         into[source] = initTable[int, bool]()
       continue

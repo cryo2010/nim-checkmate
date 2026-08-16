@@ -184,10 +184,27 @@ suite "fixture runs":
     check code == 0
 
   test "negative min_lines caps uncovered lines":
-    let (output, code) = cm("covered", "--min-lines:-2")
+    # toolchains differ in whether test-file lines get attributed, so the
+    # uncovered count is derived from the report rather than hardcoded
+    let (rep, repCode) = cm("covered")
+    check repCode == 0
+    var covered = -1
+    var total = -1
+    for ln in rep.splitLines:
+      if "TOTAL" in ln:
+        let o = ln.find('(')
+        let s = ln.find('/', o)
+        let e = ln.find(')', s)
+        if o >= 0 and s > o and e > s:
+          covered = parseInt(ln[o + 1 ..< s])
+          total = parseInt(ln[s + 1 ..< e])
+    check total > covered   # the fixture guarantees uncovered lines exist
+    let uncovered = total - covered
+    let (output, code) = cm("covered", "--min-lines:-" & $(uncovered - 1))
     check code == 1
-    check "3 uncovered lines, more than the allowed 2" in output
-    let (_, okCode) = cm("covered", "--min-lines:-3")
+    check $uncovered & " uncovered lines, more than the allowed " &
+          $(uncovered - 1) in output
+    let (_, okCode) = cm("covered", "--min-lines:-" & $uncovered)
     check okCode == 0
 
   test "min_lines without coverage warns":
