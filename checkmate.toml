@@ -31,6 +31,7 @@ max_path = 44               # rendered file paths, preceding ellipsis (0 = unlim
 max_suite = 60              # suite names, trailing ellipsis (0 = unlimited)
 max_test = 60               # test names, trailing ellipsis (0 = unlimited)
 max_value = 400             # printed values in check failures (0 = unlimited)
+context = 3                 # source lines around failing lines (0 = just the line)
 
 [coverage]
 enabled = false             # line coverage via gcov (needs xcrun, llvm-cov or gcov)

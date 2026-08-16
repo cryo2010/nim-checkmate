@@ -12,7 +12,10 @@ detection, and line coverage.
  FAIL  tests/t_math.nim
   ● math ops
     ✗ addition works
-      12 |     check a + b == 5
+        10 |   test "addition works":
+        11 |     let (a, b) = (2, 2)
+      > 12 |     check a + b == 5
+        13 |
         a + b was 4
 
 suites: 1/3 passed (1 failed, 1 flaky)
@@ -116,6 +119,7 @@ max_path = 44             # rendered file paths, preceding ellipsis (0 = unlimit
 max_suite = 60            # suite names, trailing ellipsis
 max_test = 60             # test names, trailing ellipsis
 max_value = 400           # printed values in check failures
+context = 3               # source lines around failing lines (0 = just the line)
 
 [coverage]
 enabled = false

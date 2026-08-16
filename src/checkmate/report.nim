@@ -13,12 +13,13 @@ type
     maxPath*: int       # [format] display caps; 0 = unlimited
     maxSuite*: int
     maxTest*: int
+    context*: int       # source lines around failing lines; 0 = just the line
 
 proc newReporter*(cfg: Config, filtered = false): Reporter =
   Reporter(colors: cfg.colorsEnabled, verbose: cfg.verbose, filtered: filtered,
            rootPrefix: cfg.projectRoot & $DirSep,
            maxPath: cfg.fmtMaxPath, maxSuite: cfg.fmtMaxSuite,
-           maxTest: cfg.fmtMaxTest)
+           maxTest: cfg.fmtMaxTest, context: cfg.fmtContext)
 
 proc relativize(r: Reporter, s: string): string =
   ## Nim embeds absolute source paths in check messages, stack traces, and
@@ -187,6 +188,41 @@ proc sourceLine(r: Reporter, cache: var Table[string, seq[string]],
   if idx >= 0 and idx < cache[relPath].len:
     result = cache[relPath][idx]
 
+proc gutterWidth(numStr: string, context: int): int =
+  ## Width needed for the largest line number a frame may reach.
+  try:
+    len($(parseInt(numStr) + context))
+  except ValueError:
+    numStr.len
+
+proc codeFrame(r: Reporter, cache: var Table[string, seq[string]],
+               relPath, numStr: string, numW: int, cpIndent: string): bool =
+  ## Source frame around the failing line: context lines fully muted, the
+  ## failing line marked with ">". false when the source is unavailable so
+  ## the caller can fall back to checkpoint text.
+  var lineNo = -1
+  try:
+    lineNo = parseInt(numStr)
+  except ValueError:
+    return false
+  discard r.sourceLine(cache, relPath, numStr)  # ensures the file is cached
+  let lines = cache.getOrDefault(relPath)
+  if lineNo < 1 or lineNo > lines.len:
+    return false
+  if r.context <= 0:
+    echo cpIndent, r.dim(align(numStr, numW) & " |"), " ", lines[lineNo - 1]
+    return true
+  for n in max(1, lineNo - r.context) .. min(lines.len, lineNo + r.context):
+    let code = lines[n - 1]
+    if n == lineNo:
+      echo cpIndent, r.red(">"), " ", r.dim(align($n, numW) & " |"), " ", code
+    else:
+      var s = align($n, numW) & " |"
+      if code.len > 0:
+        s.add " " & code
+      echo cpIndent, "  ", r.dim(s)
+  true
+
 proc stackLineNum(stack, relPath: string): string =
   ## Line number of the most recent frame in relPath ("path(N) proc"),
   ## used to give exception failures a line-number header like checks have.
@@ -228,10 +264,11 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
     for i, cp in f.checkpoints:
       let h = headerRewrite(r.relativize(cp), fo.tf.relPath)
       if h.isHeader:
-        if h.path.len == 0:
-          numW = max(numW, h.num.len)
+        numW = max(numW, gutterWidth(h.num, r.context))
       elif i == 0:
-        numW = max(numW, stackLineNum(r.relativize(f.stack), fo.tf.relPath).len)
+        let ln = stackLineNum(r.relativize(f.stack), fo.tf.relPath)
+        if ln.len > 0:
+          numW = max(numW, gutterWidth(ln, r.context))
   var currentSuite = "\0"  # sentinel: no suite announced yet
   for t in aggregateTests(fo):
     if t.failures.len == 0: continue
@@ -260,11 +297,8 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
       if not headerRewrite(r.relativize(cps[0]), fo.tf.relPath).isHeader:
         let lineNum = stackLineNum(r.relativize(f.stack), fo.tf.relPath)
         if lineNum.len > 0:
-          let src = r.sourceLine(srcCache, fo.tf.relPath, lineNum)
-          if src.len > 0:
-            # show the raise-site code; the exception message nests below
-            echo cpIndent, r.dim(align(lineNum, numW) & " |"), " ", src
-          else:
+          # show the raise-site code; the exception message nests below
+          if not r.codeFrame(srcCache, fo.tf.relPath, lineNum, numW, cpIndent):
             echo cpIndent, r.dim(align(lineNum, numW) & " |"), " ",
                  r.relativize(cps[0])
             cps = cps[1 .. ^1]
@@ -272,13 +306,16 @@ proc failureBlock*(r: Reporter, fo: FileOutcome) =
       let rcp = r.relativize(cp)
       let h = headerRewrite(rcp, fo.tf.relPath)
       if h.isHeader and h.path.len == 0:
-        let src = r.sourceLine(srcCache, fo.tf.relPath, h.num)
-        echo cpIndent, r.dim(align(h.num, numW) & " |"), " ",
-             (if src.len > 0: src else: h.rest)
+        if not r.codeFrame(srcCache, fo.tf.relPath, h.num, numW, cpIndent):
+          echo cpIndent, r.dim(align(h.num, numW) & " |"), " ", h.rest
       elif h.isHeader:
-        let src = r.sourceLine(srcCache, h.path, h.num)
-        echo cpIndent, r.dim(shortenPath(h.path, r.maxPath) & ":" & h.num & " |"),
-             " ", (if src.len > 0: src else: h.rest)
+        if r.context > 0 and r.sourceLine(srcCache, h.path, h.num).len > 0:
+          echo cpIndent, r.dim(shortenPath(h.path, r.maxPath) & ":")
+          discard r.codeFrame(srcCache, h.path, h.num, numW, cpIndent)
+        else:
+          let src = r.sourceLine(srcCache, h.path, h.num)
+          echo cpIndent, r.dim(shortenPath(h.path, r.maxPath) & ":" & h.num & " |"),
+               " ", (if src.len > 0: src else: h.rest)
       else:
         echo indented(rcp, cpIndent & "  ")  # values nest under their header
     if f.stack.strip.len > 0:

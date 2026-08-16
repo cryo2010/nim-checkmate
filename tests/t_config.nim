@@ -100,6 +100,12 @@ color = "never"
     writeFile(tmpRoot / "checkmate.toml", "[format]\nmax_test = -1\n")
     expect UsageError:
       discard loadConfig(tmpRoot)
+    check defaults.fmtContext == 3
+    writeFile(tmpRoot / "checkmate.toml", "[format]\ncontext = 0\n")
+    check loadConfig(tmpRoot).fmtContext == 0
+    writeFile(tmpRoot / "checkmate.toml", "[format]\ncontext = -2\n")
+    expect UsageError:
+      discard loadConfig(tmpRoot)
 
   test "invalid toml raises UsageError":
     writeFile(tmpRoot / "checkmate.toml", "[run]\nloop = \"three\"\n")

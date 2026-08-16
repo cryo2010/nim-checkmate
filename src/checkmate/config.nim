@@ -38,6 +38,7 @@ type
     fmtMaxSuite*: int   # suite names (trailing ellipsis)
     fmtMaxTest*: int    # test names (trailing ellipsis)
     fmtMaxValue*: int   # printed operand values in check failures
+    fmtContext*: int    # source lines of context around failing lines
     # [coverage]
     covEnabled*: bool
     covMinLines*: float  # >0: min percent; <0: max uncovered lines; 0: no gate
@@ -53,6 +54,7 @@ proc defaultConfig*(): Config =
     jobs: 0, loop: 1, bail: false, timeoutSec: 300,
     nimBin: "nim", backend: "c",
     fmtMaxPath: 44, fmtMaxSuite: 60, fmtMaxTest: 60, fmtMaxValue: 400,
+    fmtContext: 3,
     color: cmAuto, verbose: false, covEnabled: false)
 
 proc findProjectRoot*(startDir: string): string =
@@ -157,7 +159,7 @@ proc warnUnknownKeys(toml: TomlValueRef) =
              "time_start"],
     "compile": @["nim", "backend", "flags", "defines", "paths"],
     "output": @["color", "verbose"],
-    "format": @["max_path", "max_suite", "max_test", "max_value"],
+    "format": @["max_path", "max_suite", "max_test", "max_value", "context"],
     "coverage": @["enabled", "min_lines"],
   }.toOrderedTable
   if toml.kind != TomlValueKind.Table: return
@@ -223,10 +225,12 @@ proc loadConfig*(root: string): Config =
   result.fmtMaxSuite = format.tget("max_suite").getInt("format.max_suite", result.fmtMaxSuite)
   result.fmtMaxTest = format.tget("max_test").getInt("format.max_test", result.fmtMaxTest)
   result.fmtMaxValue = format.tget("max_value").getInt("format.max_value", result.fmtMaxValue)
+  result.fmtContext = format.tget("context").getInt("format.context", result.fmtContext)
   for (key, val) in [("max_path", result.fmtMaxPath),
                      ("max_suite", result.fmtMaxSuite),
                      ("max_test", result.fmtMaxTest),
-                     ("max_value", result.fmtMaxValue)]:
+                     ("max_value", result.fmtMaxValue),
+                     ("context", result.fmtContext)]:
     if val < 0:
       raise newException(UsageError,
         ConfigFileName & ": format." & key & " must be >= 0 (0 disables)")
@@ -313,6 +317,7 @@ max_path = 44             # rendered file paths, preceding ellipsis (0 = unlimit
 max_suite = 60            # suite names, trailing ellipsis (0 = unlimited)
 max_test = 60             # test names, trailing ellipsis (0 = unlimited)
 max_value = 400           # printed values in check failures (0 = unlimited)
+context = 3               # source lines shown around a failing line (0 = just it)
 
 [coverage]
 enabled = false           # line coverage via gcov (needs xcrun, llvm-cov or gcov)
