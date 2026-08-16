@@ -152,7 +152,8 @@ suite "fixture runs":
       workingDir = projectRoot)
     check code == 1
     check "note: using project at tests/fixtures/failing" in output
-    check " FAIL  tests/t_bad.nim" in output   # fixture-relative, not repo-relative
+    check " FAIL   tests/t_bad.nim" in output  # fixture-relative, not repo-relative
+                                               # (badge padded to FLAKY width)
 
   test "positional files from different projects run as separate groups":
     let (output, code) = execCmdEx(quoteShell(checkmateBin) &
@@ -162,7 +163,7 @@ suite "fixture runs":
     check code == 1                            # combined: failing group fails
     check "using project at tests/fixtures/failing" in output
     check "using project at tests/fixtures/passing" in output
-    check " PASS  tests/t_ok.nim" in output
+    check " PASS   tests/t_ok.nim" in output
 
   test "chdir flag runs a fixture from anywhere":
     let (_, code) = execCmdEx(

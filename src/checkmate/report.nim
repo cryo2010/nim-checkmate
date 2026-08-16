@@ -39,12 +39,17 @@ proc dim(r: Reporter, s: string): string = r.style("2", s)
 proc bold(r: Reporter, s: string): string = r.style("1", s)
 
 proc badge(r: Reporter, fs: FileStatus): string =
+  # every label is padded to the width of the widest ("FLAKY") so the
+  # badges are uniform and the filename column stays aligned when a FLAKY
+  # (or WARN/SKIP) row sits among PASS/FAIL rows
+  proc b(code, label: string): string =
+    r.style(code, " " & alignLeft(label, 5) & " ")
   case fs
-  of fsPass: r.style("1;97;42", " PASS ")
-  of fsFail, fsCompileFail: r.style("1;97;41", " FAIL ")
-  of fsFlaky: r.style("1;30;43", " FLAKY ")
-  of fsNotRun: r.style("1;30;47", " SKIP ")
-  of fsNoTests: r.style("1;30;43", " WARN ")
+  of fsPass: b("1;97;42", "PASS")
+  of fsFail, fsCompileFail: b("1;97;41", "FAIL")
+  of fsFlaky: b("1;30;43", "FLAKY")
+  of fsNotRun: b("1;30;47", "SKIP")
+  of fsNoTests: b("1;30;43", "WARN")
 
 proc fmtSecs(ms: float): string =
   formatFloat(ms / 1000.0, ffDecimal, 2) & " s"
