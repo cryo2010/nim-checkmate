@@ -354,7 +354,7 @@ nimble test       # unit + integration tests (fixtures under tests/fixtures/)
 ```
 
 CI (`.github/workflows/ci.yml`) runs build, tests, and the dogfood on
-macOS and Linux (Linux is experimental until proven on a real runner).
+macOS and Linux.
 
 ### Fixture projects
 
