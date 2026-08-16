@@ -105,6 +105,26 @@ proc colorsEnabled*(cfg: Config): bool =
 
 proc parseTimeStartNs*(s: string): int64 =
   ## time_start value to Unix epoch nanoseconds; UsageError on bad input.
+  ## Accepts ISO 8601 forms or a unix epoch in seconds (optional fraction).
+  var digitsOnly = s.len > 0
+  var dots = 0
+  for c in s:
+    if c == '.': inc dots
+    elif c notin {'0' .. '9'}: digitsOnly = false
+  if digitsOnly and dots <= 1:
+    const maxEpochSecs = 9_000_000_000'i64  # ~year 2255; ns fits in int64
+    if dots == 0:
+      let secs =
+        try: parseBiggestInt(s)
+        except ValueError: -1'i64  # absurd lengths overflow: reject below
+      if secs < 0 or secs > maxEpochSecs:
+        raise newException(UsageError, "time_start epoch out of range: " & s)
+      return secs * 1_000_000_000'i64
+    else:
+      let secs = parseFloat(s)
+      if secs > maxEpochSecs.float:
+        raise newException(UsageError, "time_start epoch out of range: " & s)
+      return int64(secs * 1e9)
   var t: Time
   var parsed = false
   for fmt in ["yyyy-MM-dd'T'HH:mm:sszzz", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd"]:
@@ -116,7 +136,8 @@ proc parseTimeStartNs*(s: string): int64 =
       discard
   if not parsed:
     raise newException(UsageError, "invalid time_start '" & s &
-      "' (accepted: 2020-06-15T12:00:00Z, 2020-06-15T12:00:00, 2020-06-15)")
+      "' (accepted: 2020-06-15T12:00:00Z, 2020-06-15T12:00:00, 2020-06-15, " &
+      "or unix epoch seconds)")
   result = t.toUnix * 1_000_000_000'i64 + t.nanosecond
   if result < 0:
     raise newException(UsageError, "time_start must not be before 1970")
@@ -311,8 +332,9 @@ pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
 time_travel = false       # virtualize clocks: sleep() is instant, time is frozen
                           # and only advances via sleep/advanceTime/travelTo
-time_start = ""           # pin the virtual wall clock, e.g. "2020-06-15T12:00:00Z"
-                          # (ISO 8601; empty = current time at run start)
+time_start = ""           # pin the virtual wall clock: ISO 8601 like
+                          # "2020-06-15T12:00:00Z" or unix epoch seconds like
+                          # "1592222400" (empty = current time at run start)
 
 [compile]
 nim = "nim"               # compiler executable

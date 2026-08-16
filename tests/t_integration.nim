@@ -386,6 +386,11 @@ suite "time travel":
     check wallMs < 60_000
     check "tests:  7/7 passed" in output
 
+  test "time-start accepts unix epoch seconds":
+    # 1592222400 == 2020-06-15T12:00:00Z, the instant t_pinned asserts
+    let (_, code) = cm("time_travel", "--time-start:1592222400")
+    check code == 0
+
   test "time-start CLI override repins the clock":
     # t_pinned asserts year 2020, so a 1999 pin must fail exactly that test
     let (output, code) = cm("time_travel", "--time-start:1999-12-31T00:00:00Z")

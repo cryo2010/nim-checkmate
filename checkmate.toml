@@ -16,8 +16,8 @@ pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
 time_travel = false         # virtualize clocks: sleep() is instant, time is frozen
                             # and only advances via sleep/advanceTime/travelTo
-time_start = ""             # pin the virtual wall clock, e.g. "2020-06-15T12:00:00Z"
-                            # (ISO 8601; empty = current time at run start)
+time_start = ""             # pin the virtual wall clock: ISO 8601 or unix epoch
+                            # seconds (empty = current time at run start)
 
 [compile]
 nim = "nim"                 # compiler executable

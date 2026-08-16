@@ -84,6 +84,17 @@ color = "never"
     expect UsageError:
       discard parseTimeStartNs("1930-01-01")  # pre-1970
 
+  test "parseTimeStartNs accepts unix epoch seconds":
+    check parseTimeStartNs("1592222400") ==
+      1_592_222_400'i64 * 1_000_000_000'i64   # same instant as the ISO form
+    check parseTimeStartNs("0") == 0          # 1970-01-01T00:00:00Z
+    check parseTimeStartNs("1592222400.5") ==
+      int64(1_592_222_400.5 * 1e9)
+    expect UsageError:
+      discard parseTimeStartNs("99999999999")  # ~year 5138: out of range
+    expect UsageError:
+      discard parseTimeStartNs("1.2.3")
+
   test "format caps parse with defaults and validate":
     let defaults = defaultConfig()
     check defaults.fmtMaxPath == 44

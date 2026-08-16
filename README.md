@@ -56,7 +56,7 @@ checkmate list [paths...]              # print discovered test files
 | `-l`, `--loop N` | run the whole suite N times to catch flaky tests |
 | `--loop-in-process` | loop each test inside one process per file (fast, lower fidelity) |
 | `--time-travel` | freeze clocks; sleeps are instant, time advances virtually |
-| `--time-start T` | pin the virtual wall clock (ISO 8601) |
+| `--time-start T` | pin the virtual wall clock (ISO 8601 or unix epoch seconds) |
 | `-j`, `--jobs N` | parallel workers (default: CPU cores) |
 | `-b`, `--bail` | stop everything at the first failing test (aborts mid-file) |
 | `--timeout SECS` | seconds a single test may run (default 300; 0 disables) |
@@ -101,7 +101,7 @@ timeout = 300             # seconds a single test may run; 0 disables
 pass_with_no_tests = false  # exit 0 even when zero tests were run
 allow_empty_tests = false   # don't fail tests that execute zero check/require/expect
 time_travel = false       # virtualize clocks: sleep() instant, time frozen
-time_start = ""           # pin the virtual wall clock (ISO 8601)
+time_start = ""           # pin the virtual wall clock (ISO 8601 or epoch seconds)
 
 [compile]
 nim = "nim"

@@ -133,7 +133,7 @@ when isMainModule:
       "minLines": "coverage gate: min percent, or max uncovered lines if negative",
       "loopInProcess": "loop inside one process per file (fast, lower fidelity)",
       "timeTravel": "freeze clocks; sleeps are instant, time advances virtually",
-      "timeStart": "pin the virtual start time (ISO 8601), e.g. 2020-06-15T12:00:00Z",
+      "timeStart": "pin the virtual start time (ISO 8601 or unix epoch seconds)",
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
     short = {"chdir": 'C'},
