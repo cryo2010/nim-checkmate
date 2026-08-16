@@ -96,12 +96,8 @@ proc covReport*(cfg: Config): CovStats =
     stderr.writeLine "checkmate: coverage: no coverage data produced"
     return
 
-  var files = newSeq[string]()
-  for f in merged.keys: files.add f
-  files.sort
-  echo ""
-  echo "Coverage (executed lines):"
-  for f in files:
+  var rows: seq[tuple[rel: string, covered, total: int, pct: float]]
+  for f in merged.keys:
     var covered, total = 0
     for _, hit in merged[f]:
       inc total
@@ -112,8 +108,16 @@ proc covReport*(cfg: Config): CovStats =
       result.worstUncovered = total - covered
       result.worstFile = relativePath(f, cfg.projectRoot)
     let pct = if total > 0: 100.0 * covered.float / total.float else: 0.0
-    echo "  ", relativePath(f, cfg.projectRoot).alignLeft(44), " ",
-         formatFloat(pct, ffDecimal, 1).align(5), "%  (", covered, "/", total, ")"
+    rows.add (relativePath(f, cfg.projectRoot), covered, total, pct)
+  # highest coverage first; ties broken by path for a stable ordering
+  rows.sort(proc(a, b: typeof(rows[0])): int =
+    result = cmp(b.pct, a.pct)
+    if result == 0: result = cmp(a.rel, b.rel))
+  echo ""
+  echo "Coverage (executed lines):"
+  for r in rows:
+    echo "  ", r.rel.alignLeft(44), " ",
+         formatFloat(r.pct, ffDecimal, 1).align(5), "%  (", r.covered, "/", r.total, ")"
   let totalPct = if result.total > 0: 100.0 * result.covered.float / result.total.float else: 0.0
   echo "  ", "TOTAL".alignLeft(44), " ",
        formatFloat(totalPct, ffDecimal, 1).align(5), "%  (", result.covered, "/", result.total, ")"

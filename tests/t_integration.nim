@@ -260,6 +260,12 @@ suite "fixture runs":
           check t > c
           sawRow = true
     check sawRow
+    # rows are sorted by coverage percentage, highest first: the fully
+    # covered stringlib must appear before the partial mathlib
+    let stringIdx = output.find("src/stringlib.nim")
+    let mathIdx = output.find("src/mathlib.nim")
+    check stringIdx >= 0
+    check stringIdx < mathIdx
 
   test "min_lines percent gate fails below threshold":
     # generous margins: totals vary by gcov accounting (72-78% observed)
