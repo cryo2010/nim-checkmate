@@ -80,9 +80,46 @@ suite "foldEvents":
     let o = foldEvents(evs, 1, false)
     check o.tests[0].name == "same"
     check o.tests[1].name == "same (2)"
-    # in-process looping keeps occurrences merged (occurrence k = iteration k)
-    let o2 = foldEvents(evs, 1, false, dedupeNames = false)
+    # the dedupe key is iteration-scoped: the SAME test block repeating
+    # across in-process loop iterations keeps one name
+    let looped = @[
+      Event(kind: ekTestStarted, test: "same", iter: 1),
+      Event(kind: ekTestEnded, test: "same", status: "OK", durMs: 1, iter: 1),
+      Event(kind: ekTestStarted, test: "same", iter: 2),
+      Event(kind: ekTestEnded, test: "same", status: "OK", durMs: 1, iter: 2),
+    ]
+    let o2 = foldEvents(looped, 0, false)
+    check o2.tests[0].name == "same"
     check o2.tests[1].name == "same"
+
+  test "quit(0) mid-test is a crash, not a pass":
+    let evs = @[
+      Event(kind: ekTestStarted, test: "one"),
+      Event(kind: ekTestEnded, test: "one", status: "OK", durMs: 1),
+      Event(kind: ekTestStarted, test: "two"),
+    ]
+    let o = foldEvents(evs, 0, false)   # exit 0: quit(0) from user code
+    check o.crashed
+    check o.crashedTest == "two"
+    check o.tests[1].status == "CRASHED"
+    check o.tests[1].checkpoints.len > 0   # annotated with the cause
+
+  test "crashing duplicate-named test does not merge with its namesake":
+    let evs = @[
+      Event(kind: ekTestStarted, test: "same"),
+      Event(kind: ekTestEnded, test: "same", status: "OK", durMs: 1),
+      Event(kind: ekTestStarted, test: "same"),
+    ]
+    let o = foldEvents(evs, 139, false)
+    check o.tests[1].name == "same (2)"
+    check o.tests[1].status == "CRASHED"
+    # aggregation now sees two distinct tests, not one phantom flake
+    var fo = FileOutcome(compiled: true,
+      runs: @[IterRun(iteration: 1, exitCode: 139, outcome: o)])
+    let agg = aggregateTests(fo)
+    check agg.len == 2
+    check agg[0].passes == 1 and agg[0].fails == 0
+    check agg[1].fails == 1
 
   test "helper-proc failure with OK status is repaired to FAILED":
     # fail() outside the test body's scope cannot set testStatusIMPL
@@ -166,6 +203,8 @@ suite "foldEvents":
 suite "splitInProcessRuns":
   proc tr(name, status: string): TestRun =
     TestRun(name: name, status: status, durMs: 1)
+  proc tri(name, status: string, iter: int): TestRun =
+    TestRun(name: name, status: status, durMs: 1, iter: iter)
 
   test "k-th occurrence lands in iteration k":
     let outcome = FileRunOutcome(tests: @[
@@ -211,6 +250,42 @@ suite "splitInProcessRuns":
     check runs.len == 2
     check not runs[0].iterFailed
     check runs[1].iterFailed  # nonzero process exit lands on the last iteration
+
+  test "explicit iteration tags slot duplicate-named tests correctly":
+    # two distinct `test "x"` blocks under --loop:2: foldEvents suffixes
+    # the second block per iteration, tags map each run to its true slot
+    let outcome = foldEvents(@[
+      Event(kind: ekTestStarted, test: "x", iter: 1),
+      Event(kind: ekTestEnded, test: "x", status: "OK", durMs: 1, iter: 1),
+      Event(kind: ekTestStarted, test: "x", iter: 2),
+      Event(kind: ekTestEnded, test: "x", status: "OK", durMs: 1, iter: 2),
+      Event(kind: ekTestStarted, test: "x", iter: 1),
+      Event(kind: ekTestEnded, test: "x", status: "FAILED", durMs: 1, iter: 1),
+      Event(kind: ekTestStarted, test: "x", iter: 2),
+      Event(kind: ekTestEnded, test: "x", status: "FAILED", durMs: 1, iter: 2),
+    ], 1, false)
+    check outcome.tests[2].name == "x (2)"
+    let runs = splitInProcessRuns(outcome, 2, 1, false, 4.0, "log")
+    check runs.len == 2
+    check runs[0].outcome.tests.len == 2   # "x" and "x (2)" both in iter 1
+    check runs[1].outcome.tests.len == 2
+    var fo = FileOutcome(compiled: true, runs: runs)
+    check fileStatus(fo) == fsFail         # consistent failure, NOT flaky
+    let agg = aggregateTests(fo)
+    check agg.len == 2
+    check agg[0].passes == 2 and agg[0].fails == 0
+    check agg[1].fails == 2 and agg[1].passes == 0
+
+  test "slow-but-completed TIMEOUT rewrite keeps later iterations":
+    # the process ran all 3 iterations and exited 0; iteration 1 merely
+    # exceeded the per-test budget post-hoc and must not erase 2 and 3
+    let outcome = FileRunOutcome(tests: @[
+      tri("a", "TIMEOUT", 1), tri("a", "OK", 2), tri("a", "FAILED", 3)])
+    let runs = splitInProcessRuns(outcome, 3, 0, false, 30.0, "log")
+    check runs.len == 3
+    check runs[0].iterFailed
+    check not runs[1].iterFailed
+    check runs[2].iterFailed   # a real failure in iteration 3 survives
 
 suite "aggregation":
   proc iterRun(iteration, exit: int, tests: seq[TestRun]): IterRun =

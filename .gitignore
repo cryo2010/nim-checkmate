@@ -1,6 +1,7 @@
 /checkmate
 .checkmate/
 tests/fixtures/flaky/flake_marker
+tests/fixtures/spawner/child.pid
 nimcache/
 .claude/settings.local.json
 *.gcov

@@ -106,13 +106,13 @@ proc colorsEnabled*(cfg: Config): bool =
 proc parseTimeStartNs*(s: string): int64 =
   ## time_start value to Unix epoch nanoseconds; UsageError on bad input.
   ## Accepts ISO 8601 forms or a unix epoch in seconds (optional fraction).
+  const maxEpochSecs = 9_000_000_000'i64  # ~year 2255; ns fits in int64
   var digitsOnly = s.len > 0
   var dots = 0
   for c in s:
     if c == '.': inc dots
     elif c notin {'0' .. '9'}: digitsOnly = false
   if digitsOnly and dots <= 1:
-    const maxEpochSecs = 9_000_000_000'i64  # ~year 2255; ns fits in int64
     if dots == 0:
       let secs =
         try: parseBiggestInt(s)
@@ -138,9 +138,14 @@ proc parseTimeStartNs*(s: string): int64 =
     raise newException(UsageError, "invalid time_start '" & s &
       "' (accepted: 2020-06-15T12:00:00Z, 2020-06-15T12:00:00, 2020-06-15, " &
       "or unix epoch seconds)")
-  result = t.toUnix * 1_000_000_000'i64 + t.nanosecond
-  if result < 0:
+  let secs = t.toUnix
+  if secs < 0:
     raise newException(UsageError, "time_start must not be before 1970")
+  if secs > maxEpochSecs:
+    # same bound as the numeric branch: without it the ns multiplication
+    # overflows int64 for dates past ~2262 (OverflowDefect, not UsageError)
+    raise newException(UsageError, "time_start epoch out of range: " & s)
+  result = secs * 1_000_000_000'i64 + t.nanosecond
 
 # --- TOML loading ---------------------------------------------------------
 

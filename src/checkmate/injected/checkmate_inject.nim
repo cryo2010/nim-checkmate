@@ -26,6 +26,14 @@ when declared(checkmateOrigGetMonoTime):
 else:
   template checkmateRealMono(): MonoTime = getMonoTime()
 
+# the overlay tags every in-process loop iteration; carrying the tag in
+# events lets aggregation slot runs exactly instead of guessing iterations
+# from occurrence order (which duplicate test names would break)
+when declared(checkmateCurrentIter):
+  template checkmateIter(): int = checkmateCurrentIter
+else:
+  template checkmateIter(): int = 0
+
 proc emit(cf: CheckmateFormatter, node: JsonNode) =
   cf.f.writeLine($node)
   cf.f.flushFile()
@@ -35,7 +43,7 @@ method suiteStarted(cf: CheckmateFormatter, suiteName: string) =
 
 method testStarted(cf: CheckmateFormatter, testName: string) =
   cf.testStart = checkmateRealMono()
-  cf.emit(%*{"e": "testStarted", "test": testName})
+  cf.emit(%*{"e": "testStarted", "test": testName, "iter": checkmateIter()})
 
 method failureOccurred(cf: CheckmateFormatter, checkpoints: seq[string],
                        stackTrace: string) =
@@ -45,18 +53,19 @@ method testEnded(cf: CheckmateFormatter, testResult: TestResult) =
   let durMs = (checkmateRealMono() - cf.testStart).inNanoseconds.float / 1e6
   cf.emit(%*{"e": "testEnded", "suite": testResult.suiteName,
              "test": testResult.testName, "status": $testResult.status,
-             "durMs": durMs})
+             "durMs": durMs, "iter": checkmateIter()})
 
 method suiteEnded(cf: CheckmateFormatter) =
   cf.emit(%*{"e": "suiteEnded"})
 
-# bail mode: abort the binary at the first failing test so remaining tests
-# and loop iterations never run (fail() emits failureOccurred, then quits)
-if getEnv("CHECKMATE_BAIL") == "1":
-  abortOnError = true
-
 let checkmateEventsFile = getEnv("CHECKMATE_EVENTS_FILE")
 if checkmateEventsFile.len > 0:
+  # bail mode: abort the binary at the first failing test so remaining tests
+  # and loop iterations never run (fail() emits failureOccurred, then quits).
+  # Gated on the events file: a stray CHECKMATE_BAIL in the environment must
+  # not change the behavior of a standalone (stock) run
+  if getEnv("CHECKMATE_BAIL") == "1":
+    abortOnError = true
   try:
     let cf = CheckmateFormatter(f: open(checkmateEventsFile, fmAppend))
     cf.emit(%*{"e": "init", "pid": getCurrentProcessId()})

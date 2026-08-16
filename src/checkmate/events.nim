@@ -16,6 +16,7 @@ type
     test*: string
     status*: string
     durMs*: float
+    iter*: int             # in-process loop iteration (0 = untagged binary)
     checkpoints*: seq[string]
     stack*: string
 
@@ -24,6 +25,7 @@ type
     suite*, name*: string
     status*: string        # OK | FAILED | SKIPPED | CRASHED | TIMEOUT
     durMs*: float
+    iter*: int             # overlay iteration tag; 0 when not looping in-process
     checkpoints*: seq[string]
     stack*: string
 
@@ -95,6 +97,7 @@ proc parseEvents*(path: string): seq[Event] =
     of "testStarted":
       ev.kind = ekTestStarted
       ev.test = node{"test"}.getStr
+      ev.iter = node{"iter"}.getInt
     of "failure":
       ev.kind = ekFailure
       for c in node{"checkpoints"}.getElems:
@@ -106,6 +109,7 @@ proc parseEvents*(path: string): seq[Event] =
       ev.test = node{"test"}.getStr
       ev.status = node{"status"}.getStr
       ev.durMs = node{"durMs"}.getFloat
+      ev.iter = node{"iter"}.getInt
     of "suiteEnded":
       ev.kind = ekSuiteEnded
     else:
@@ -113,13 +117,15 @@ proc parseEvents*(path: string): seq[Event] =
     result.add ev
 
 proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
-                 testTimeoutMs = 0.0, dedupeNames = true): FileRunOutcome =
+                 testTimeoutMs = 0.0): FileRunOutcome =
   ## Attribute failures to tests, detect crashes (testStarted without
-  ## testEnded + abnormal exit) and empty runs. With testTimeoutMs > 0,
-  ## a test that COMPLETED but exceeded the per-test budget is rewritten
-  ## to TIMEOUT (hung tests are killed by the pool's progress watchdog
-  ## before they can complete; this catches the slow-but-finishing rest).
+  ## testEnded, regardless of exit code) and empty runs. With
+  ## testTimeoutMs > 0, a test that COMPLETED but exceeded the per-test
+  ## budget is rewritten to TIMEOUT (hung tests are killed by the pool's
+  ## progress watchdog before they can complete; this catches the
+  ## slow-but-finishing rest).
   var openTest = ""
+  var openIter = 0
   var suiteStack: seq[string]   # suites can nest; testEnded carries its own
   var pendingCheckpoints: seq[string]
   var pendingStack = ""
@@ -135,6 +141,7 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
       if suiteStack.len > 0: suiteStack.setLen(suiteStack.len - 1)
     of ekTestStarted:
       openTest = ev.test
+      openIter = ev.iter
       pendingCheckpoints = @[]
       pendingStack = ""
       pendingFailure = false
@@ -158,18 +165,19 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
         # failure clears the status but the exit code already says failed
         status = "FAILED"
       var name = ev.test
-      let key = ev.suite & "::" & ev.test
+      # duplicate test names in one run are DISTINCT tests; without a
+      # suffix the aggregation would merge them into a phantom flake.
+      # Keyed per iteration so under in-process looping the same block
+      # keeps one name across iterations while a second same-named block
+      # is suffixed consistently in every iteration.
+      let key = ev.suite & "::" & ev.test & "::" & $ev.iter
       let count = nameCounts.getOrDefault(key) + 1
       nameCounts[key] = count
-      if dedupeNames and count > 1:
-        # duplicate test names in one run are DISTINCT tests; without a
-        # suffix the aggregation would merge them into a phantom flake.
-        # (Skipped under in-process looping, where the k-th occurrence of
-        # a name IS iteration k.)
+      if count > 1:
         name.add " (" & $count & ")"
       result.tests.add TestRun(
-        suite: ev.suite, name: name, status: status,
-        durMs: ev.durMs, checkpoints: pendingCheckpoints, stack: pendingStack)
+        suite: ev.suite, name: name, status: status, durMs: ev.durMs,
+        iter: ev.iter, checkpoints: pendingCheckpoints, stack: pendingStack)
       openTest = ""
       pendingCheckpoints = @[]
       pendingStack = ""
@@ -181,10 +189,13 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
         t.checkpoints.add "Test exceeded the timeout (" &
           formatFloat(t.durMs / 1000, ffDecimal, 1) & " s > " &
           formatFloat(testTimeoutMs / 1000, ffDecimal, 1) & " s)"
-  if openTest.len > 0 and (exitCode != 0 or timedOut):
-    # a recorded failure before the cut-off means the test FAILED and the
-    # binary stopped (bail's abortOnError quits before testEnded fires);
-    # only an eventless cut-off is a genuine crash
+  if openTest.len > 0:
+    # the binary stopped mid-test: even a CLEAN exit here means this test
+    # never finished and everything after it never ran, so quit(0) from
+    # user code must not turn a truncated run into a pass. A recorded
+    # failure before the cut-off means the test FAILED and the binary
+    # stopped (bail's abortOnError quits before testEnded fires); only an
+    # eventless cut-off is a genuine crash
     let status =
       if timedOut: "TIMEOUT"
       elif pendingCheckpoints.len > 0: "FAILED"
@@ -192,8 +203,18 @@ proc foldEvents*(events: seq[Event], exitCode: int, timedOut: bool,
     if status == "CRASHED":
       result.crashed = true
       result.crashedTest = openTest
+      if exitCode == 0:
+        pendingCheckpoints.add "the process exited cleanly mid-test " &
+          "(quit(0) from user code?); this test and everything after it never finished"
+    var name = openTest
+    let key = openSuite & "::" & openTest & "::" & $openIter
+    let count = nameCounts.getOrDefault(key) + 1
+    if count > 1:
+      # same dedupe as testEnded: a crashing duplicate-named test must not
+      # merge with an earlier completed namesake into a phantom flake
+      name.add " (" & $count & ")"
     result.tests.add TestRun(
-      suite: openSuite, name: openTest, status: status,
+      suite: openSuite, name: name, status: status, iter: openIter,
       checkpoints: pendingCheckpoints, stack: pendingStack)
   elif result.tests.len == 0:
     if exitCode != 0 or timedOut:
@@ -229,16 +250,19 @@ proc fileStatus*(fo: FileOutcome): FileStatus =
 proc splitInProcessRuns*(outcome: FileRunOutcome, loopN, exitCode: int,
                          timedOut: bool, durMs: float,
                          logPath: string): seq[IterRun] =
-  ## Reconstructs per-iteration outcomes from one in-process-looped run:
-  ## the overlay repeats each test N times, so the k-th occurrence of a
-  ## test name belongs to iteration k. Iterations after a crash or timeout
+  ## Reconstructs per-iteration outcomes from one in-process-looped run.
+  ## Runs carry the overlay's explicit iteration tag; events from an
+  ## untagged (older) binary fall back to "the k-th occurrence of a test
+  ## name is iteration k". Iterations after a crash or a watchdog kill
   ## never ran and are dropped (not counted as passed).
   var occ = initTable[string, int]()
   var slots = newSeq[FileRunOutcome](loopN)
   for t in outcome.tests:
-    let key = t.suite & "::" & t.name
-    let k = min(occ.getOrDefault(key) + 1, loopN)
-    occ[key] = k
+    var k = t.iter
+    if k < 1 or k > loopN:
+      let key = t.suite & "::" & t.name
+      k = min(occ.getOrDefault(key) + 1, loopN)
+      occ[key] = k
     slots[k - 1].tests.add t
     if t.status == "CRASHED":
       slots[k - 1].crashed = true
@@ -249,7 +273,12 @@ proc splitInProcessRuns*(outcome: FileRunOutcome, loopN, exitCode: int,
     slots[0].noTests = true
   var last = loopN - 1
   for i in 0 ..< loopN:
-    if slots[i].crashed or slots[i].tests.anyIt(it.status == "TIMEOUT"):
+    # a crashed slot ends the run; a TIMEOUT-status test does so only when
+    # the watchdog actually killed the process. The post-hoc rewrite in
+    # foldEvents marks slow-but-COMPLETED tests TIMEOUT while later
+    # iterations really ran, and those results must not be discarded
+    if slots[i].crashed or
+        (timedOut and slots[i].tests.anyIt(it.status == "TIMEOUT")):
       last = i
       break
   if timedOut or exitCode != 0:

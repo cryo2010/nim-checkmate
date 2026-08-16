@@ -93,10 +93,12 @@ suite "fixture runs":
     check "(passed 2/4)" in output
     check "(flaky: failed 2/4)" in output
 
-  test "in-process loop falls back without the overlay":
+  test "in-process loop builds the overlay even with allow-empty-tests":
+    # loop_in_process is a farm consumer in its own right: allow_empty_tests
+    # must not silently downgrade it to process-level looping
     let (output, code) = cm("passing", "--loop:2 --loop-in-process --allow-empty-tests")
     check code == 0
-    check "falling back to process-level looping" in output
+    check "falling back to process-level looping" notin output
 
   test "bail skips remaining suites":
     let (output, code) = cm("bail", "--bail")
@@ -181,6 +183,45 @@ suite "fixture runs":
     check "dies mid test" in output
     check "(crashed)" in output
     check "SIGSEGV" in output
+
+  test "quit(0) mid-test fails instead of passing":
+    let (output, code) = cm("quit_zero")
+    check code == 1
+    check "quits mid-test" in output
+    check "(crashed)" in output
+    check "exited cleanly mid-test" in output
+
+  test "duplicate names under in-process loop are not phantom flakes":
+    let (output, code) = cm("dup_names", "--loop:2 --loop-in-process")
+    check code == 1
+    check "roundtrip (2)" in output            # second block, distinct test
+    check "FLAKY" notin output                 # fails consistently, no flake
+    check "failed in all 2 iterations" in output
+    check "tests:  1/2 passed (1 failed)" in output
+
+  test "a stuck test emitting failures forever still times out":
+    let t0 = getMonoTime()
+    let (output, code) = cm("restless")
+    let wallMs = (getMonoTime() - t0).inMilliseconds
+    check code == 1
+    check "(timed out)" in output
+    # compile dominates; the run itself must die at ~1 s, not hang forever
+    check wallMs < 60_000
+
+  test "timeout kill takes the test's children with it":
+    removeFile(fixture("spawner") / "child.pid")
+    let (output, code) = cm("spawner")
+    check code == 1
+    check "(timed out)" in output
+    let pid = parseInt(readFile(fixture("spawner") / "child.pid").strip)
+    removeFile(fixture("spawner") / "child.pid")
+    var gone = false
+    for _ in 1 .. 100:   # up to ~10 s for the tree kill to land
+      if execCmd("kill -0 " & $pid & " 2>/dev/null") != 0:
+        gone = true
+        break
+      sleep(100)
+    check gone
 
   test "compile errors pass through verbatim":
     let (output, code) = cm("compile_error")
@@ -272,17 +313,18 @@ suite "fixture runs":
     check code == 0
     check "Test has no assertions" notin output
 
-  test "farm-compiled binary enforces standalone":
+  test "farm-compiled binary behaves stock when run standalone":
     discard cm("empty_test")  # ensure the binary is farm-compiled
-    # unset CHECKMATE_EVENTS_FILE: when this suite itself runs under
-    # checkmate, the child would otherwise inherit it, suppress its console
-    # output, and append its events into OUR events file
+    # unset checkmate's env vars: when this suite itself runs under
+    # checkmate, the child would otherwise inherit them and stop being
+    # "standalone" (events into OUR file, enforcement enabled, ...)
     let (output, code) = execCmdEx(
-      "env -u CHECKMATE_EVENTS_FILE " &
+      "env -u CHECKMATE_EVENTS_FILE -u CHECKMATE_ENFORCE_EMPTY" &
+      " -u CHECKMATE_MAX_VALUE -u CHECKMATE_BAIL -u CHECKMATE_LOOP " &
         quoteShell(fixture("empty_test") / ".checkmate" / "bin" / "tests__t_mixed"),
       workingDir = fixture("empty_test"))
-    check code == 1
-    check "Test has no assertions" in output
+    check code == 0                            # no enforcement standalone
+    check "Test has no assertions" notin output
 
   test "list prints files without running":
     # subcommand must come first; flags before it would dispatch to run

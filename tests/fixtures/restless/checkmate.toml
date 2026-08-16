@@ -1,0 +1,4 @@
+# restless fixture: a stuck test that emits failures forever must still
+# trip the per-test timeout (mid-test events are not watchdog progress).
+[run]
+timeout = 1

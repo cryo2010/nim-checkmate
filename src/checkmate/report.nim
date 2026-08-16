@@ -141,7 +141,11 @@ proc headerRewrite(cp, relPath: string): HeaderParts =
   if open <= 0:
     return
   let path = cp[0 ..< open]
-  if not path.endsWith(".nim"):
+  # a path containing spaces is almost certainly a VALUE checkpoint whose
+  # text embeds lineinfo (e.g. `err was tests/x.nim(3, 5): ...`), not a
+  # real header; misclassifying it would swallow the value line entirely.
+  # Genuinely-spaced project paths degrade to plain checkpoint text.
+  if not path.endsWith(".nim") or ' ' in path:
     return
   var idx = open + 1
   var lineNum = ""

@@ -35,6 +35,10 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
     result = SuiteSummary(files: fos, wallMs: elapsedMs(t0))
     return
   prepareCacheDirs(cfg)
+  if cfg.covEnabled:
+    # clear BEFORE any phase can bail: stale counters from a previous run
+    # must never survive into this run's report
+    covClean(cfg)
   discard materializeInject(cfg.cacheDir)
   let jobs = resolveJobs(cfg)
   var bailed = false
@@ -45,7 +49,10 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   var extraFlags = if cfg.covEnabled: covCompileFlags() else: newSeq[string]()
   var farmOk = false
   var timeOk = false
-  if not cfg.allowEmptyTests or cfg.timeTravel:
+  var inProcessLoop = cfg.loopInProcess and cfg.loop > 1
+  # the farm serves three consumers: empty-test enforcement, time travel,
+  # and in-process looping (CHECKMATE_LOOP only exists in the overlay)
+  if not cfg.allowEmptyTests or cfg.timeTravel or inProcessLoop:
     let farm = prepareLibFarm(cfg)
     farmOk = farm.ok
     timeOk = farm.timeOk
@@ -55,7 +62,6 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
       stderr.writeLine "checkmate: warning: " & farm.warning
     if cfg.timeTravel and farm.ok and not farm.timeOk:
       stderr.writeLine "checkmate: warning: " & farm.timeWarning
-  var inProcessLoop = cfg.loopInProcess and cfg.loop > 1
   if inProcessLoop and not farmOk:
     stderr.writeLine "checkmate: warning: loop_in_process needs the unittest " &
       "overlay (unavailable here); falling back to process-level looping"
@@ -103,8 +109,6 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   # run's aggregation (the formatter appends): start from an empty dir
   removeDir(cfg.cacheDir / "events")
   createDir(cfg.cacheDir / "events")
-  if cfg.covEnabled:
-    covClean(cfg)
   var runnable: seq[int]
   for i in 0 ..< files.len:
     if fos[i].compiled: runnable.add i
@@ -121,19 +125,23 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
       removeFile(evPath)
       var cmd = quoteShell(ctasks[fi].binPath)
       if filterStr.len > 0: cmd.add " " & filterStr
-      var env = @[("CHECKMATE_EVENTS_FILE", evPath),
-                  ("CHECKMATE_MAX_VALUE", $cfg.fmtMaxValue)]
-      if inProcessLoop:
-        env.add ("CHECKMATE_LOOP", $cfg.loop)
-      if timeTravelActive:
-        env.add ("CHECKMATE_TIME_TRAVEL", "1")
-        env.add ("CHECKMATE_TIME_START_NS", $timeStartNs)
-      if cfg.allowEmptyTests and farmOk:
-        # farm in use (time travel) but enforcement opted out at runtime
-        env.add ("CHECKMATE_ALLOW_EMPTY", "1")
-      if cfg.bail:
-        # first failing test aborts the binary mid-file (abortOnError)
-        env.add ("CHECKMATE_BAIL", "1")
+      # every var is set EXPLICITLY, on or off: the parent process may
+      # itself be a test binary running under checkmate (dogfooding), and
+      # its inherited CHECKMATE_* vars must never leak into this run.
+      # ENFORCE_EMPTY is a per-run opt-in (compiled-in default is OFF, so
+      # the same binary behaves stock standalone); BAIL=1 aborts the
+      # binary mid-file at the first failing test (abortOnError)
+      var env = @[
+        ("CHECKMATE_EVENTS_FILE", evPath),
+        ("CHECKMATE_MAX_VALUE", $cfg.fmtMaxValue),
+        ("CHECKMATE_LOOP", if inProcessLoop: $cfg.loop else: "1"),
+        ("CHECKMATE_TIME_TRAVEL", if timeTravelActive: "1" else: "0"),
+        ("CHECKMATE_TIME_START_NS",
+         if timeTravelActive: $timeStartNs else: ""),
+        ("CHECKMATE_ENFORCE_EMPTY",
+         if not cfg.allowEmptyTests and farmOk: "1" else: "0"),
+        ("CHECKMATE_BAIL", if cfg.bail: "1" else: "0"),
+      ]
       tasks.add PoolTask(
         id: meta.len, cmd: cmd,
         logPath: cfg.cacheDir / "logs" / files[fi].slug & "." & $iteration & ".log",
@@ -141,8 +149,9 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
         serialKey: files[fi].slug,  # a file's iterations never overlap: test
                                     # files own their resources exclusively
         env: env,
-        # per-test budget: the watchdog deadline resets on every event the
-        # test binary emits, so it fires when ONE test stalls for timeoutSec
+        # per-test budget: the watchdog deadline resets on test BOUNDARY
+        # events (started/ended), so it fires when ONE test stalls for
+        # timeoutSec even if that test keeps emitting failure checkpoints
         timeoutSec: cfg.timeoutSec,
         watchFile: evPath)
       meta.add (fi: fi, iteration: iteration)
@@ -155,8 +164,7 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
     proc(t: PoolTask, r: PoolResult): PoolCtl =
       let (fi, iteration) = meta[t.id]
       let outcome = foldEvents(parseEvents(evPaths[t.id]), r.exitCode, r.timedOut,
-                               testTimeoutMs = cfg.timeoutSec.float * 1000,
-                               dedupeNames = not inProcessLoop)
+                               testTimeoutMs = cfg.timeoutSec.float * 1000)
       if inProcessLoop:
         fos[fi].runs = splitInProcessRuns(
           outcome, loopN, r.exitCode, r.timedOut, r.durationMs, t.logPath)
@@ -167,7 +175,16 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
       inc completed[fi]
       if completed[fi] == itersPerFile:
         rep.fileLine(fos[fi])
-      if bailOnFail and (r.exitCode != 0 or r.timedOut): pcBail
+      # bail on ANY detected failure, not just process-level ones: a folded
+      # outcome can be red while the binary exited 0 (quit(0) after a
+      # recorded failure, post-hoc timeout rewrite)
+      var anyFailed = r.exitCode != 0 or r.timedOut
+      if not anyFailed:
+        for run in fos[fi].runs:
+          if run.iterFailed:
+            anyFailed = true
+            break
+      if bailOnFail and anyFailed: pcBail
       else: pcContinue)
   bailed = rbailed
   if bailed:

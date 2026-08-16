@@ -24,6 +24,8 @@ proc materializeInject*(cacheDir: string): string =
   result = cacheDir / "inject"
   createDir(result)
   let path = result / InjectModuleName & ".nim"
+  if symlinkExists(path):
+    removeFile(path)  # writeFile follows links; never write through one
   if not fileExists(path) or readFile(path) != injectSource:
     writeFile(path, injectSource)
 

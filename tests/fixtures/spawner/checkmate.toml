@@ -1,0 +1,4 @@
+# spawner fixture: a timed-out test's spawned children must be killed
+# with it, or they hold its resources into the next iteration.
+[run]
+timeout = 1

@@ -15,13 +15,15 @@
 ## preventing a farm where a frozen monotonic clock hangs asyncdispatch).
 ##
 ## Virtualization is runtime-gated by env vars (CHECKMATE_TIME_TRAVEL,
-## CHECKMATE_ALLOW_EMPTY, CHECKMATE_LOOP), so toggling features never
-## changes compile commands or thrashes nimcaches.
+## CHECKMATE_ENFORCE_EMPTY, CHECKMATE_LOOP), so toggling features never
+## changes compile commands or thrashes nimcaches. Every gate defaults to
+## OFF when its var is absent, so a farm-compiled binary run standalone
+## behaves like a stock std/unittest build.
 
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 11
+const OverlayVersion = 12
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -122,15 +124,19 @@ var checkmateMaxValueCache = -1
 
 proc checkmateMaxValueCap(): int =
   ## Printed-value cap from CHECKMATE_MAX_VALUE ([format] max_value);
-  ## default 400, 0 disables truncation.
+  ## 0 disables truncation. Unset (a standalone run outside checkmate)
+  ## means stock behavior: no truncation at all.
   if checkmateMaxValueCache < 0:
-    checkmateMaxValueCache = 400
+    checkmateMaxValueCache = 0
     let v = checkmateEnvvars.getEnv("CHECKMATE_MAX_VALUE")
-    if v.len > 0 and v.len <= 9:
+    if v.len > 0:
       var n = 0
       var valid = true
       for c in v:
-        if c in {'0' .. '9'}: n = n * 10 + ord(c) - ord('0')
+        if c in {'0' .. '9'}:
+          # saturate instead of rejecting: an absurdly large cap must mean
+          # "effectively unlimited", never a silent fallback
+          if n < 100_000_000: n = n * 10 + ord(c) - ord('0')
         else: valid = false
       if valid: checkmateMaxValueCache = n
   checkmateMaxValueCache
@@ -455,26 +461,31 @@ proc checkmateLoopCount*(): int =
         discard
   checkmateLoopNCache
 
-var checkmateAllowEmptyCache = -1
+var checkmateEnforceEmptyCache = -1
 
-proc checkmateAllowEmpty*(): bool =
-  ## Runtime opt-out of empty-test enforcement (CHECKMATE_ALLOW_EMPTY=1),
-  ## set by checkmate when allow_empty_tests is on but the farm is needed
-  ## anyway (e.g. for time travel).
-  if checkmateAllowEmptyCache < 0:
-    checkmateAllowEmptyCache =
-      if checkmateOs.getEnv("CHECKMATE_ALLOW_EMPTY") == "1": 1 else: 0
-  checkmateAllowEmptyCache == 1
+proc checkmateEnforceEmpty*(): bool =
+  ## Empty-test enforcement is an explicit opt-in from the checkmate
+  ## runner (CHECKMATE_ENFORCE_EMPTY=1). Standalone runs never enforce:
+  ## a farm-compiled binary must behave like a stock unittest build.
+  if checkmateEnforceEmptyCache < 0:
+    checkmateEnforceEmptyCache =
+      if checkmateOs.getEnv("CHECKMATE_ENFORCE_EMPTY") == "1": 1 else: 0
+  checkmateEnforceEmptyCache == 1
+
+var checkmateCurrentIter* {.threadvar.}: int
+  ## 1-based in-process loop iteration, read by the inject formatter so
+  ## every event carries an exact iteration tag.
 
 template test*(name, body) {.dirty.} =
   # the loop wraps the ORIGINAL test template, so suite setup/teardown and
   # testStarted/testEnded events all fire once per iteration
   for checkmateLoopIter in 1 .. checkmateLoopCount():
+    checkmateCurrentIter = checkmateLoopIter
     checkmateOrigTest name:
       let checkmateAssertionsBefore {.used.} = checkmateAssertions
       body
       if checkmateAssertions == checkmateAssertionsBefore and
-          testStatusIMPL == TestStatus.OK and not checkmateAllowEmpty():
+          testStatusIMPL == TestStatus.OK and checkmateEnforceEmpty():
         checkpoint("Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)")
         fail()
 """
@@ -684,6 +695,11 @@ proc buildOverlays*(libDir: string): OverlaySet =
 # --- farm building --------------------------------------------------------
 
 proc buildFarm*(libDir, farm: string, overlays: seq[(string, string)]) =
+  # if the farm PATH is itself a symlink (leftover state, tampering),
+  # removeDir would follow it and recursively delete the TARGET's contents,
+  # i.e. the real toolchain lib dir: drop the link itself, never recurse
+  if symlinkExists(farm):
+    removeFile(farm)
   removeDir(farm)
   var overridden = initTable[string, HashSet[string]]()  # top dir -> basenames
   for (rel, _) in overlays:
@@ -755,6 +771,8 @@ proc prepareLibFarm*(cfg: Config):
     try:
       createDir(cfg.cacheDir)
       buildFarm(libDir, result.dir, ovs.overlays)
+      if symlinkExists(stampPath):
+        removeFile(stampPath)  # writeFile follows links; never write through
       writeFile(stampPath, stamp)
     except OSError as e:
       return (false, false, "", disabled & "cannot build lib overlay: " & e.msg,

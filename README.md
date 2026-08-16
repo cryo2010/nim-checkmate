@@ -1,8 +1,8 @@
 # checkmate
 
-A jest-like test runner for Nim. One binary that discovers, compiles, and runs
-your unmodified `std/unittest` files in parallel, with pretty output, flake
-detection, and line coverage.
+A test runner for Nim, inspired by [jest](https://jestjs.io/). The CLI discovers,
+compiles, and runs your unmodified `std/unittest` files in parallel, with advanced
+features like flake detection, line coverage and time travel.
 
 ```
  PASS  tests/t_config.nim (0.70 s)
@@ -33,8 +33,8 @@ nimble install checkmate
 
 ```sh
 cd my-project
+checkmate init            # (optional) generate checkmate.toml
 checkmate                 # discover tests/t*.nim, compile, run, report
-checkmate init            # generate checkmate.toml (optional)
 ```
 
 No changes to your test files are needed; anything that works with
@@ -130,7 +130,7 @@ Add `.checkmate/` (the build/state cache) to your `.gitignore`.
 
 ## Flake detection
 
-`--loop:N` compiles once and runs every file N times, interleaved so early
+`--loop=N` compiles once and runs every file N times, interleaved so early
 iterations of all files finish first. Iterations of the *same* file never
 run concurrently with each other (test files can assume exclusive ownership
 of their temp dirs, ports, databases, ...); different files still fill the
@@ -288,8 +288,10 @@ checkmate compiles each test file with `--import:checkmate_inject`, a tiny
 module (embedded in the checkmate binary, materialized into `.checkmate/`)
 that registers a JSONL-emitting `OutputFormatter` before `std/unittest`
 initializes. unittest then never installs its console formatter, checkmate
-gets structured per-test events over a file, and your binaries stay fully
-stock when run standalone. For empty-test enforcement, tests compile with
+gets structured per-test events over a file, and your binaries behave
+stock when run standalone: every checkmate feature is gated on a
+`CHECKMATE_*` env var the runner sets per run, and every gate defaults to
+off. For empty-test enforcement, tests compile with
 `--lib:` pointing at `.checkmate/libfarm`, a symlink mirror of your
 toolchain's lib directory whose `pure/unittest.nim` is a runtime-patched
 copy of your own toolchain's source with assertion-counting wrappers; both
@@ -314,9 +316,7 @@ demonstrates each):
   though the exit code says failed; checkmate reports FAILED with the
   failure detail.
 - **Duplicate test names** are distinct tests, disambiguated as
-  `name (2)` so they cannot masquerade as a flaky single test (not
-  applicable under `--loop-in-process`, where repetition encodes
-  iterations).
+  `name (2)` so they cannot masquerade as a flaky single test.
 - **Nested suites** are tracked as a stack for crash attribution.
 
 ## Limitations
@@ -335,13 +335,15 @@ demonstrates each):
   `check true` in its main body. Assertions in `teardown` blocks don't
   count either (they run after the per-test verdict).
 - **The timeout is per test, enforced from outside the process**: a hung
-  test is detected when the file's event stream stops progressing for
-  `timeout` seconds. Killing it necessarily kills the whole file's process,
-  so tests after the hung one are not run. A test that finishes but
-  exceeded the budget is failed post-hoc without affecting its siblings.
-- **Empty-test enforcement is baked in at compile time**, so binaries under
-  `.checkmate/bin/` enforce it even when run standalone; a `--nimflags`
-  `--lib:` override is shadowed by checkmate's own when enforcement is on.
+  test is detected when the file's event stream reaches no test boundary
+  (start or end) for `timeout` seconds; mid-test output does not count as
+  progress. Killing it kills the whole file's process tree (including any
+  children the test spawned), so tests after the hung one are not run. A
+  test that finishes but exceeded the budget is failed post-hoc without
+  affecting its siblings.
+- **`quit(0)` inside a test** is detected and reported as a crash (the
+  run was truncated), but `quit(0)` *between* tests is indistinguishable
+  from a normal completion: tests after the quit are silently absent.
 - **POSIX only** for now (`/bin/sh` process wrapper); Windows would need a
   small port in `pool.nim`.
 
@@ -388,3 +390,7 @@ for manual testing:
 | `own_params` | documented argv-clash limitation with `-t` |
 | `quirks` | std/unittest edge cases checkmate repairs (see below) |
 | `long_names` | long paths shortened with preceding ellipsis |
+| `quit_zero` | `quit(0)` mid-test reported as a crash, not a pass |
+| `dup_names` | duplicate-named test blocks, incl. under `--loop-in-process` |
+| `restless` | a stuck test emitting failures forever still times out |
+| `spawner` | timeout kills the whole process tree, not just the test binary |
