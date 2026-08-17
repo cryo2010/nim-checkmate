@@ -25,7 +25,6 @@ features like flake detection, line coverage and time travel.
   advances via `advanceTime`/`travelTo`.
 - **Per-test timeouts**: a progress-based watchdog kills a hung test and
   its whole process tree.
-- **Bail**: `--bail` stops the run at the first failing test.
 - **Empty-test enforcement**: fails tests that execute no assertions
   (opt-out with `--allow-empty-tests`).
 - **Configurable**: a single `checkmate.toml`; every flag has a config
@@ -41,17 +40,31 @@ features like flake detection, line coverage and time travel.
 - [Empty-test enforcement](#empty-test-enforcement)
 - [Time travel](#time-travel)
 - [Coverage](#coverage)
-- [How it works](#how-it-works)
-- [Repaired std/unittest quirks](#repaired-stdunittest-quirks)
 - [Limitations](#limitations)
-- [Development](#development)
-  - [Fixture projects](#fixture-projects)
+- [Fixture projects](#fixture-projects)
 
 ## Install
 
 ```sh
 nimble install checkmate
 ```
+
+That is the only step for normal use: it fetches checkmate's Nim
+dependencies (`cligen` and `parsetoml`) for you. You also need:
+
+- **Nim >= 2.0.0** and a **C compiler** (`gcc` or `clang`), which Nim uses
+  for its C backend. Most Nim toolchains already include one.
+- A **POSIX shell** and **`ps`**: checkmate runs each test binary through
+  `/bin/sh` and uses `ps` to kill a timed-out test's process tree. Both are
+  standard on macOS and Linux. (Windows is not yet supported.)
+
+For `--coverage`, checkmate also needs a gcov-compatible tool. It probes for
+these in order, so any one of them works:
+
+1. `xcrun llvm-cov gcov` (macOS: install the Command Line Tools with
+   `xcode-select --install`)
+2. `llvm-cov` (LLVM/Clang: `brew install llvm`, `apt install llvm`, ...)
+3. `gcov` (GCC: ships with `gcc`)
 
 ## Quick start
 
@@ -202,9 +215,9 @@ are exempt. A deliberate smoke test stays green with an explicit
 `allow_empty_tests = true`.
 
 This works by compiling tests against a generated overlay of your own
-toolchain's `std/unittest` (see How it works); if a future Nim version
-changes unittest's internals, checkmate detects the mismatch, prints a
-warning, and compiles fully stock instead.
+toolchain's `std/unittest`; if a future Nim version changes unittest's
+internals, checkmate detects the mismatch, prints a warning, and compiles
+fully stock instead.
 
 The overlay also upgrades failing-check output: operand values of types
 without a `$` are printed via `repr` (stock unittest silently omits them),
@@ -302,46 +315,7 @@ lines (steadier than percentages for small projects):
 
 ```
 checkmate: coverage 72.7% is below the required minimum of 80.0% (src/mathlib.nim has the most uncovered lines: 3)
-``` Only files inside the
-project are reported; test files themselves may be partially attributed to
-`std/unittest` templates by gcov and are best read indicatively.
-
-## How it works
-
-checkmate compiles each test file with `--import:checkmate_inject`, a tiny
-module (embedded in the checkmate binary, materialized into `.checkmate/`)
-that registers a JSONL-emitting `OutputFormatter` before `std/unittest`
-initializes. unittest then never installs its console formatter, checkmate
-gets structured per-test events over a file, and your binaries behave
-stock when run standalone: every checkmate feature is gated on a
-`CHECKMATE_*` env var the runner sets per run, and every gate defaults to
-off. For empty-test enforcement, tests compile with
-`--lib:` pointing at `.checkmate/libfarm`, a symlink mirror of your
-toolchain's lib directory whose `pure/unittest.nim` is a runtime-patched
-copy of your own toolchain's source with assertion-counting wrappers; both
-`import unittest` and `import std/unittest` resolve to it. Test binaries
-run in a polling process pool with
-their output captured per run; each file gets a private nimcache, so
-parallel compiles are safe and unchanged files rebuild in well under a
-second. Test-name filters are passed straight to unittest's own filtering.
-
-## Repaired std/unittest quirks
-
-Some std/unittest behaviors misreport results to any formatter-based
-observer; checkmate detects and repairs them (the `quirks` fixture
-demonstrates each):
-
-- **Failures in helper procs**: `fail()`/failing `check`s outside the test
-  body cannot set the test's status (a compile-time scoping quirk), so the
-  test ends "OK" despite the failure. checkmate treats the failure event as
-  authoritative and reports the test FAILED, annotating checkpoint-less
-  `fail()` calls.
-- **`skip()` after a failure** reports SKIPPED in stock unittest even
-  though the exit code says failed; checkmate reports FAILED with the
-  failure detail.
-- **Duplicate test names** are distinct tests, disambiguated as
-  `name (2)` so they cannot masquerade as a flaky single test.
-- **Nested suites** are tracked as a stack for crash attribution.
+```
 
 ## Limitations
 
@@ -371,22 +345,11 @@ demonstrates each):
 - **POSIX only** for now (`/bin/sh` process wrapper); Windows would need a
   small port in `pool.nim`.
 
-## Development
-
-```sh
-nimble build      # build ./checkmate
-nimble test       # unit + integration tests (fixtures under tests/fixtures/)
-./checkmate       # dogfood: checkmate runs its own suite
-```
-
-CI (`.github/workflows/ci.yml`) runs build, tests, and the dogfood on
-macOS and Linux.
-
-### Fixture projects
+## Fixture projects
 
 `tests/fixtures/` holds self-contained subprojects, each with a static
-`checkmate.toml`, exercised end to end by `t_integration.nim` and handy
-for manual testing:
+`checkmate.toml`, exercised end to end by `t_integration.nim`. They are
+also convenient for manual testing:
 
 ```sh
 ./checkmate -C tests/fixtures/flaky --loop:10       # watch FLAKY reporting
@@ -412,7 +375,7 @@ for manual testing:
 | `covered` | coverage table and `min_lines` gating |
 | `time_travel` | frozen clocks, pinned start, explicit API, async auto-advance |
 | `own_params` | documented argv-clash limitation with `-t` |
-| `quirks` | std/unittest edge cases checkmate repairs (see below) |
+| `quirks` | std/unittest edge cases checkmate repairs |
 | `long_names` | long paths shortened with preceding ellipsis |
 | `quit_zero` | `quit(0)` mid-test reported as a crash, not a pass |
 | `dup_names` | duplicate-named test blocks, incl. under `--loop-in-process` |
