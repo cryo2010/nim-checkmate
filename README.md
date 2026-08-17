@@ -9,6 +9,44 @@ features like flake detection, line coverage and time travel.
 
 <img src="docs/screenshot.png" alt="checkmate CLI output" width="100%">
 
+## Features
+
+- **Zero setup**: discovers and runs your unmodified `std/unittest`
+  files; nothing in your tests needs to change.
+- **Parallel**: compiles and runs test files concurrently, each in its
+  own process with a private nimcache.
+- **Flake detection**: `--loop N` reruns the suite to surface flaky
+  tests, reporting per-iteration pass/fail ratios.
+- **Rich failure output**: power-assert decomposition of `and`/`or`/`not`
+  expressions, verbatim source frames, and string/seq diff windows.
+- **Line coverage**: gcov-based per-file coverage with a `min_lines`
+  gate (minimum percent or maximum uncovered lines).
+- **Time travel**: freeze the clock so `sleep` is instant and time only
+  advances via `advanceTime`/`travelTo`.
+- **Per-test timeouts**: a progress-based watchdog kills a hung test and
+  its whole process tree.
+- **Bail**: `--bail` stops the run at the first failing test.
+- **Empty-test enforcement**: fails tests that execute no assertions
+  (opt-out with `--allow-empty-tests`).
+- **Configurable**: a single `checkmate.toml`; every flag has a config
+  key, and positional paths resolve their own project root.
+
+## Contents
+
+- [Install](#install)
+- [Quick start](#quick-start)
+- [Usage](#usage)
+- [Configuration (checkmate.toml)](#configuration-checkmatetoml)
+- [Flake detection](#flake-detection)
+- [Empty-test enforcement](#empty-test-enforcement)
+- [Time travel](#time-travel)
+- [Coverage](#coverage)
+- [How it works](#how-it-works)
+- [Repaired std/unittest quirks](#repaired-stdunittest-quirks)
+- [Limitations](#limitations)
+- [Development](#development)
+  - [Fixture projects](#fixture-projects)
+
 ## Install
 
 ```sh
