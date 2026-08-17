@@ -32,6 +32,7 @@ features like flake detection, line coverage and time travel.
 
 ## Contents
 
+- [System Requirements](#system-requirements)
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Usage](#usage)
@@ -43,28 +44,24 @@ features like flake detection, line coverage and time travel.
 - [Limitations](#limitations)
 - [Fixture projects](#fixture-projects)
 
+## System Requirements
+
+- **Nim >= 2.0.0**
+- A **C compiler** (`gcc` or `clang`)
+- A **POSIX shell** and **`ps`**: checkmate runs each test binary through
+  `/bin/sh` and uses `ps` to kill a timed-out test's process tree. Both are
+  standard on macOS and Linux. (Windows is not yet supported.)
+- For `--coverage`, checkmate also needs a gcov-compatible tool. It probes for
+  these in order, so any one of them works:
+    1. `xcrun llvm-cov gcov` (macOS: install the Command Line Tools with `xcode-select --install`)
+    2. `llvm-cov` (LLVM/Clang: `brew install llvm`, `apt install llvm`, ...)
+    3. `gcov` (GCC: ships with `gcc`)
+
 ## Install
 
 ```sh
 nimble install checkmate
 ```
-
-That is the only step for normal use: it fetches checkmate's Nim
-dependencies (`cligen` and `parsetoml`) for you. You also need:
-
-- **Nim >= 2.0.0** and a **C compiler** (`gcc` or `clang`), which Nim uses
-  for its C backend. Most Nim toolchains already include one.
-- A **POSIX shell** and **`ps`**: checkmate runs each test binary through
-  `/bin/sh` and uses `ps` to kill a timed-out test's process tree. Both are
-  standard on macOS and Linux. (Windows is not yet supported.)
-
-For `--coverage`, checkmate also needs a gcov-compatible tool. It probes for
-these in order, so any one of them works:
-
-1. `xcrun llvm-cov gcov` (macOS: install the Command Line Tools with
-   `xcode-select --install`)
-2. `llvm-cov` (LLVM/Clang: `brew install llvm`, `apt install llvm`, ...)
-3. `gcov` (GCC: ships with `gcc`)
 
 ## Quick start
 
