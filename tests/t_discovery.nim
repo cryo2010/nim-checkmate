@@ -31,16 +31,19 @@ suite "discoverTests":
     let found = discoverTests(cfg, @[]).mapIt(it.relPath)
     check "tests/fixtures/x/t_fix.nim" notin found
     check found.len == 3
-  test "explicit file bypasses pattern":
-    let found = discoverTests(mkCfg(), @[tmpRoot / "tests" / "helper.nim"])
-    check found.len == 1
-    check found[0].relPath == "tests/helper.nim"
-  test "explicit dir applies pattern":
-    let found = discoverTests(mkCfg(), @[tmpRoot / "tests" / "sub"]).mapIt(it.relPath)
+  test "positional regex narrows to matching paths":
+    let found = discoverTests(mkCfg(), @["sub"]).mapIt(it.relPath)
     check found == @["tests/sub/t_c.nim"]
-  test "missing path raises UsageError":
+  test "positional pattern is a regex, not a literal path":
+    # a char class matches t_a and t_c but not test_b: proves it is a regex
+    let found = discoverTests(mkCfg(), @["t_[ac]"]).mapIt(it.relPath).sorted
+    check found == @["tests/sub/t_c.nim", "tests/t_a.nim"].sorted
+  test "multiple positional regexes OR together":
+    let found = discoverTests(mkCfg(), @["t_a", "test_b"]).mapIt(it.relPath).sorted
+    check found == @["tests/t_a.nim", "tests/test_b.nim"].sorted
+  test "invalid positional regex raises UsageError":
     expect UsageError:
-      discard discoverTests(mkCfg(), @[tmpRoot / "nope"])
+      discard discoverTests(mkCfg(), @["("])
   test "slugs flatten separators":
     let found = discoverTests(mkCfg(), @[]).filterIt(it.relPath == "tests/sub/t_c.nim")
     check found[0].slug == "tests__sub__t_c"

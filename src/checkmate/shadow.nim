@@ -23,7 +23,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 14
+const OverlayVersion = 15
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -512,7 +512,41 @@ var checkmateCurrentIter* {.threadvar.}: int
   ## 1-based in-process loop iteration, read by the inject formatter so
   ## every event carries an exact iteration tag.
 
-template test*(name, body) {.dirty.} =
+# --- name filtering (--test-name-pattern) ---------------------------------
+# Only pulled in when the checkmate runner requests it (-d:checkmateNameRegex),
+# so ordinary farm builds never compile the regex engine. The regex itself is
+# matched INSIDE the binary (the only place a test can truly be skipped),
+# gating the original test template so unmatched tests never execute.
+when defined(checkmateNameRegex):
+  import regex as checkmateRegex
+
+  var checkmateNameRx: checkmateRegex.Regex2
+  var checkmateNameRxState = 0  # 0 = uncompiled, 1 = active, 2 = run-all
+
+  proc checkmateNameMatches*(suiteName, testName: string): bool =
+    ## Whether a test runs under CHECKMATE_NAME_REGEX. Compiled once; an
+    ## unset/invalid pattern runs everything (the host validates the pattern
+    ## up front, so invalid is unreachable in practice, but degrade safe).
+    ## Matched against the test name and the "suite test" join, so either a
+    ## test-oriented or a suite-oriented pattern selects the test.
+    if checkmateNameRxState == 0:
+      let pat = checkmateEnvvars.getEnv("CHECKMATE_NAME_REGEX")
+      if pat.len == 0:
+        checkmateNameRxState = 2
+      else:
+        try:
+          checkmateNameRx = checkmateRegex.re2(pat)
+          checkmateNameRxState = 1
+        except checkmateRegex.RegexError:
+          checkmateNameRxState = 2
+    if checkmateNameRxState != 1:
+      return true
+    if checkmateRegex.contains(testName, checkmateNameRx):
+      return true
+    suiteName.len > 0 and
+      checkmateRegex.contains(suiteName & " " & testName, checkmateNameRx)
+
+template checkmateRunLoop*(name, body) {.dirty.} =
   # the loop wraps the ORIGINAL test template, so suite setup/teardown and
   # testStarted/testEnded events all fire once per iteration
   for checkmateLoopIter in 1 .. checkmateLoopCount():
@@ -524,6 +558,16 @@ template test*(name, body) {.dirty.} =
           testStatusIMPL == TestStatus.OK and checkmateEnforceEmpty():
         checkpoint("Test has no assertions (checkmate: add a check, or run with --allow-empty-tests)")
         fail()
+
+template test*(name, body) {.dirty.} =
+  when defined(checkmateNameRegex):
+    # a non-matching test is skipped whole: no testStarted/testEnded events,
+    # exactly like std/unittest's own command-line filter
+    if checkmateNameMatches(
+        when declared(testSuiteName): testSuiteName else: "", name):
+      checkmateRunLoop(name, body)
+  else:
+    checkmateRunLoop(name, body)
 """
 
 proc patchUnittest*(source: string): string =

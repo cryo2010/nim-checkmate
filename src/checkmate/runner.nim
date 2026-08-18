@@ -1,33 +1,20 @@
 ## Orchestration: discover -> compile -> run (x loop iterations) -> aggregate.
 ## runOnce is the watch-mode seam: pure and re-invokable, no quit() here.
 
-import std/[cpuinfo, monotimes, os, strutils, times]
+import std/[cpuinfo, monotimes, os, times]
 import ./config, ./discovery, ./events, ./compiler, ./pool, ./report, ./coverage,
        ./shadow
 
 proc resolveJobs(cfg: Config): int =
   if cfg.jobs > 0: cfg.jobs else: max(1, countProcessors())
 
-proc filterArgs*(filters: seq[string]): string =
-  ## std/unittest globs support only exact, prefix*, *suffix, and
-  ## prefix*suffix matching, so a contains-style *PAT* is inexpressible.
-  ## A bare -t PAT expands to the OR'd pair "PAT*" + "*PAT" (starts-with or
-  ## ends-with); values containing '*' or '::' pass through verbatim.
-  var parts: seq[string]
-  for f in filters:
-    if '*' in f or "::" in f:
-      parts.add quoteShell(f)
-    else:
-      parts.add quoteShell(f & "*")
-      parts.add quoteShell("*" & f)
-  parts.join(" ")
-
 proc elapsedMs(t0: MonoTime): float =
   (getMonoTime() - t0).inNanoseconds.float / 1e6
 
-proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): SuiteSummary =
+proc runOnce*(cfg: Config, pathPatterns: seq[string]; namePattern: string;
+              rep: Reporter): SuiteSummary =
   let t0 = getMonoTime()
-  let files = discoverTests(cfg, cliPaths)
+  let files = discoverTests(cfg, pathPatterns)
   var fos = newSeq[FileOutcome](files.len)
   for i, tf in files:
     fos[i] = FileOutcome(tf: tf)
@@ -50,9 +37,11 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   var farmOk = false
   var timeOk = false
   var inProcessLoop = cfg.loopInProcess and cfg.loop > 1
-  # the farm serves three consumers: empty-test enforcement, time travel,
-  # and in-process looping (CHECKMATE_LOOP only exists in the overlay)
-  if not cfg.allowEmptyTests or cfg.timeTravel or inProcessLoop:
+  # the farm serves four consumers: empty-test enforcement, time travel,
+  # in-process looping (CHECKMATE_LOOP only exists in the overlay), and
+  # regex name filtering (the overlay's test template does the skipping)
+  if not cfg.allowEmptyTests or cfg.timeTravel or inProcessLoop or
+      namePattern.len > 0:
     let farm = prepareLibFarm(cfg)
     farmOk = farm.ok
     timeOk = farm.timeOk
@@ -66,6 +55,15 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
     stderr.writeLine "checkmate: warning: loop_in_process needs the unittest " &
       "overlay (unavailable here); falling back to process-level looping"
     inProcessLoop = false
+  var nameFilterActive = namePattern.len > 0
+  if nameFilterActive and not farmOk:
+    stderr.writeLine "checkmate: warning: name filtering (--test-name-pattern) " &
+      "needs the unittest overlay (unavailable here); running all tests"
+    nameFilterActive = false
+  if nameFilterActive:
+    # compiles the regex path into the test binary; the overlay's test
+    # template then skips tests whose name does not match at runtime
+    extraFlags.add "-d:checkmateNameRegex"
   let timeTravelActive = cfg.timeTravel and farmOk and timeOk
   if cfg.timeTravel and not timeTravelActive and not farmOk:
     stderr.writeLine "checkmate: warning: time travel disabled: the stdlib " &
@@ -112,7 +110,6 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
   var runnable: seq[int]
   for i in 0 ..< files.len:
     if fos[i].compiled: runnable.add i
-  let filterStr = filterArgs(filters)
   # in-process loop: one process per file, the overlay repeats each test
   # CHECKMATE_LOOP times; otherwise one process per (file, iteration)
   let itersPerFile = if inProcessLoop: 1 else: cfg.loop
@@ -123,8 +120,7 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
     for fi in runnable:                 # iteration k before iteration k+1
       let evPath = cfg.cacheDir / "events" / files[fi].slug & "." & $iteration & ".jsonl"
       removeFile(evPath)
-      var cmd = quoteShell(ctasks[fi].binPath)
-      if filterStr.len > 0: cmd.add " " & filterStr
+      let cmd = quoteShell(ctasks[fi].binPath)
       # every var is set EXPLICITLY, on or off: the parent process may
       # itself be a test binary running under checkmate (dogfooding), and
       # its inherited CHECKMATE_* vars must never leak into this run.
@@ -141,6 +137,7 @@ proc runOnce*(cfg: Config, cliPaths, filters: seq[string], rep: Reporter): Suite
         ("CHECKMATE_ENFORCE_EMPTY",
          if not cfg.allowEmptyTests and farmOk: "1" else: "0"),
         ("CHECKMATE_BAIL", if cfg.bail: "1" else: "0"),
+        ("CHECKMATE_NAME_REGEX", if nameFilterActive: namePattern else: ""),
       ]
       tasks.add PoolTask(
         id: meta.len, cmd: cmd,

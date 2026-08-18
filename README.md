@@ -27,8 +27,9 @@ features like flake detection, line coverage and time travel.
   its whole process tree.
 - **Empty-test enforcement**: fails tests that execute no assertions
   (opt-out with `--allow-empty-tests`).
-- **Configurable**: a single `checkmate.toml`; every flag has a config
-  key, and positional paths resolve their own project root.
+- **Jest-style filtering**: a positional regex selects test files by path,
+  `-t` selects tests by name; both are real regexes.
+- **Configurable**: a single `checkmate.toml`; every flag has a config key.
 
 ## Contents
 
@@ -84,9 +85,9 @@ checkmate list [paths...]              # print discovered test files
 
 | Option | Meaning |
 | --- | --- |
-| `paths...` | test files (verbatim) or directories (walked with the filename pattern); each resolves its own project root (nearest `checkmate.toml`), so files in nested projects run under their own config and cache |
+| `paths...` | regex(es) matched (unanchored) against discovered test-file paths, jest-style; multiple args OR together; omit to run all |
 | `-C`, `--chdir DIR` | run as if started in DIR (git-style) |
-| `-t`, `--filter PAT` | run tests whose name starts or ends with PAT; repeatable (OR'd) |
+| `-t`, `--test-name-pattern RE` | run only tests whose name matches the regex RE (jest-style) |
 | `-l`, `--loop N` | run the whole suite N times to catch flaky tests |
 | `--loop-in-process` | loop each test inside one process per file (fast, lower fidelity) |
 | `--time-travel` | freeze clocks; sleeps are instant, time advances virtually |
@@ -105,11 +106,12 @@ checkmate list [paths...]              # print discovered test files
 Examples:
 
 ```sh
-checkmate tests/api                    # one directory
-checkmate tests/t_parser.nim           # one file
-checkmate -t addition                  # test-name filter
-checkmate -t 'mysuite::'               # a whole suite
-checkmate -t 'fast_suite::mytest*'     # raw std/unittest filter syntax
+checkmate parser                       # files whose path matches /parser/
+checkmate 'integration/'               # files under an integration path
+checkmate api parser                   # files matching /api/ OR /parser/
+checkmate -t addition                  # tests whose name matches /addition/
+checkmate -t 'parses|renders'          # test-name regex (alternation, anchors, ...)
+checkmate parser -t 'edge case'        # combine: path AND name filters
 checkmate --loop:20 --jobs:4           # flake hunting
 checkmate --bail --timeout:30          # fail fast in CI
 ```
@@ -316,13 +318,12 @@ checkmate: coverage 72.7% is below the required minimum of 80.0% (src/mathlib.ni
 
 ## Limitations
 
-- **Test-name filters are not regexes.** `std/unittest` supports only
-  exact, `prefix*`, `*suffix`, and `prefix*suffix` matching, so a bare
-  `-t PAT` means "starts or ends with PAT". Anything with `*` or `::` is
-  passed through verbatim.
-- **Binaries that read their own params** clash with `-t`: unittest ingests
-  all argv as filters, and checkmate's filter args will reach your
-  `paramStr` too. Without `-t`, no args are passed.
+- **`-t` builds the overlay.** A test-name regex is matched *inside* the
+  test binary (the only place a test can truly be skipped), via the stdlib
+  overlay, so any run that passes `-t` builds the overlay farm the same way
+  `--time-travel` does. Path filtering (positional regex) is done in the
+  runner and needs no overlay. checkmate never passes argv to the test
+  binary, so tests that read their own `paramStr` are unaffected by filters.
 - **Checks inside spawned threads** don't reach formatters (true of stock
   unittest as well) and are invisible to checkmate's per-test reporting.
   They also don't count for empty-test enforcement (the counter is

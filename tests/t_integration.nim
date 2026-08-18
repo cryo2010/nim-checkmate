@@ -57,13 +57,14 @@ suite "fixture runs":
     check "suites: 1/2 passed (1 failed)" in output
     check "tests:  2/4 passed (2 failed)" in output
 
-  test "filter runs only matching tests":
+  test "name filter -t runs only matching tests":
+    # -t is a regex over test names; "addition" matches only "addition works"
     let (output, code) = cm("passing", "-t addition")
     check code == 0
     check "tests:  1/1 passed" in output
     check "no matching tests" in output   # the file without matches
 
-  test "filter matching nothing fails by default":
+  test "name filter matching nothing fails by default":
     let (output, code) = cm("passing", "-t zzz_no_such_test")
     check code == 1
     check "failing because no tests were run" in output
@@ -71,6 +72,30 @@ suite "fixture runs":
   test "pass-with-no-tests allows zero matches":
     let (_, code) = cm("passing", "-t zzz_no_such_test --pass-with-no-tests")
     check code == 0
+
+  test "positional regex narrows the discovered file set":
+    let (output, code) = cm("passing", "strings")
+    check code == 0
+    check "t_strings.nim" in output
+    check "t_ok.nim" notin output   # filtered out before compiling
+
+  test "name filter supports alternation":
+    # sub|upp selects "subtraction works" (t_ok) and "upper" (t_strings)
+    let (output, code) = cm("passing", "-t 'sub|upp'")
+    check code == 0
+    check "tests:  2/2 passed" in output
+
+  test "name filter supports regex anchors":
+    # works$ end-anchors, matching only "addition works" + "subtraction works"
+    let (output, code) = cm("passing", "-t 'works$'")
+    check code == 0
+    check "tests:  2/2 passed" in output
+    check "no matching tests" in output   # t_strings has none
+
+  test "invalid name filter regex is a usage error":
+    let (output, code) = cm("passing", "-t '('")
+    check code == 2
+    check "invalid --test-name-pattern regex" in output
 
   test "consistently failing loops summarize instead of listing iterations":
     let (output, code) = cm("failing", "--loop:3")
@@ -144,27 +169,6 @@ suite "fixture runs":
     check "sleeps for 2 seconds" in output
     check "(timed out)" in output
 
-  test "positional files resolve their own project root":
-    # a fixture file run from the repo root uses the FIXTURE's config and
-    # cache (nearest checkmate.toml to the file), not the repo's
-    let (output, code) = execCmdEx(quoteShell(checkmateBin) &
-      " --color:never tests/fixtures/failing/tests/t_bad.nim",
-      workingDir = projectRoot)
-    check code == 1
-    check "note: using project at tests/fixtures/failing" in output
-    check " FAIL   tests/t_bad.nim" in output  # fixture-relative, not repo-relative
-                                               # (badge padded to FLAKY width)
-
-  test "positional files from different projects run as separate groups":
-    let (output, code) = execCmdEx(quoteShell(checkmateBin) &
-      " --color:never tests/fixtures/failing/tests/t_bad.nim" &
-      " tests/fixtures/passing/tests/t_ok.nim",
-      workingDir = projectRoot)
-    check code == 1                            # combined: failing group fails
-    check "using project at tests/fixtures/failing" in output
-    check "using project at tests/fixtures/passing" in output
-    check " PASS   tests/t_ok.nim" in output
-
   test "chdir flag runs a fixture from anywhere":
     let (_, code) = execCmdEx(
       quoteShell(checkmateBin) & " --color:never -C " &
@@ -173,8 +177,9 @@ suite "fixture runs":
 
   test "timeout is per test, not per file":
     # t_steady runs 4.5 s total against a 2 s timeout, but each test
-    # resets the progress watchdog, so the file passes
-    let (output, code) = cm("hanging", "tests/t_steady.nim")
+    # resets the progress watchdog, so the file passes (positional regex
+    # selects just that file, skipping the fixture's hanging sibling)
+    let (output, code) = cm("hanging", "t_steady")
     check code == 0
     check "3/3 passed" in output
 
