@@ -1,4 +1,5 @@
 import std/[unittest, times, monotimes]
+import checkmate  # advanceTime / travelTo
 
 suite "explicit time control":
   test "advanceTime moves both clocks":

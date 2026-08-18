@@ -1,3 +1,8 @@
 [run]
 time_travel = true
 time_start = "2020-06-15T12:00:00Z"
+
+[compile]
+# dogfood only: resolve the in-repo `checkmate` module for `import checkmate`.
+# Installed users get it from `nimble install checkmate` (nimble path).
+paths = ["../../../src"]
