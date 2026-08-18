@@ -2,6 +2,7 @@
 ## apply excludes, honor explicit CLI paths.
 
 import std/[os, algorithm, sequtils, strutils]
+import regex
 import ./config
 
 type
@@ -28,6 +29,15 @@ proc globMatch*(s, pattern: string): bool =
       si < s.len and s[si] == p[pi] and gm(s, si + 1, p, pi + 1)
   gm(s, 0, pattern, 0)
 
+proc compilePattern*(pattern, flagName: string): Regex2 =
+  ## Compile a user-supplied regex, turning a bad pattern into a UsageError
+  ## (re2 on a runtime string raises RegexError, which would otherwise crash).
+  try:
+    result = re2(pattern)
+  except RegexError as e:
+    raise newException(UsageError,
+      "invalid " & flagName & " regex '" & pattern & "': " & e.msg)
+
 proc toTestFile*(cfg: Config, path: string): TestFile =
   let absPath = absolutePath(path)
   var rel = relativePath(absPath, cfg.projectRoot)
@@ -48,21 +58,24 @@ proc walkTestDir(cfg: Config, dir: string, into: var seq[TestFile]) =
       if not cfg.excluded(tf.relPath):
         into.add tf
 
-proc discoverTests*(cfg: Config, cliPaths: seq[string]): seq[TestFile] =
-  ## Without cliPaths: walk cfg.dirs with pattern + exclude.
-  ## Explicit file args are included verbatim; dir args are walked.
-  if cliPaths.len == 0:
-    for d in cfg.dirs:
-      let dir = if isAbsolute(d): d else: cfg.projectRoot / d
-      if dirExists(dir):
-        cfg.walkTestDir(dir, result)
-  else:
-    for p in cliPaths:
-      if fileExists(p):
-        result.add cfg.toTestFile(p)
-      elif dirExists(p):
-        cfg.walkTestDir(p, result)
-      else:
-        raise newException(UsageError, "no such file or directory: " & p)
+proc discoverTests*(cfg: Config, pathPatterns: seq[string]): seq[TestFile] =
+  ## Walk cfg.dirs with pattern + exclude, then (jest-style) keep only files
+  ## whose project-relative path matches ANY of pathPatterns (unanchored
+  ## regexes, OR'd). No patterns runs everything discovered.
+  for d in cfg.dirs:
+    let dir = if isAbsolute(d): d else: cfg.projectRoot / d
+    if dirExists(dir):
+      cfg.walkTestDir(dir, result)
   result = result.deduplicate
+  if pathPatterns.len > 0:
+    var rxs: seq[Regex2]
+    for p in pathPatterns:
+      rxs.add compilePattern(p, "test path filter")
+    var kept: seq[TestFile]
+    for tf in result:
+      for rx in rxs:
+        if tf.relPath.contains(rx):
+          kept.add tf
+          break
+    result = kept
   result.sort proc(a, b: TestFile): int = cmp(a.relPath, b.relPath)
