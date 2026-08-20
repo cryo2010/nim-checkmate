@@ -64,6 +64,11 @@ proc runOnce*(cfg: Config, pathPatterns: seq[string]; namePattern: string;
     # compiles the regex path into the test binary; the overlay's test
     # template then skips tests whose name does not match at runtime
     extraFlags.add "-d:checkmateNameRegex"
+  if farmOk and timeOk:
+    # the farm carries checkmate_timebase, so a test that `import checkmate`s
+    # can resolve the virtual-clock primitives; without this the module's
+    # time-travel controls take their stock (raising) fallback path
+    extraFlags.add "-d:checkmateTimebase"
   let timeTravelActive = cfg.timeTravel and farmOk and timeOk
   if cfg.timeTravel and not timeTravelActive and not farmOk:
     stderr.writeLine "checkmate: warning: time travel disabled: the stdlib " &

@@ -73,7 +73,9 @@ checkmate                 # discover tests/t*.nim, compile, run, report
 ```
 
 No changes to your test files are needed; anything that works with
-`import std/unittest` works with checkmate.
+`import std/unittest` works with checkmate. The one exception is explicitly
+calling the [time-travel](#time-travel) controls, which live behind an
+`import checkmate`.
 
 ## Usage
 
@@ -275,16 +277,22 @@ Pin the wall clock for date-dependent tests with
 explicitly from tests when auto mode isn't enough:
 
 ```nim
+import checkmate  # advanceTime / travelTo / timeTravelActive
+
 advanceTime(1500)                        # ms
 advanceTime(initDuration(minutes = 5))
 travelTo(dateTime(1999, mDec, 31))       # wall jump, backward allowed;
 check timeTravelActive()                 # monotonic time never regresses
 ```
 
-The API arrives via `import std/unittest` under checkmate (helper modules
-can `import checkmate_timebase`); files that must also compile stock can
-guard with `when declared(advanceTime)`. Reported test durations stay
-real-clock, and the per-test timeout still catches genuine hangs.
+These explicit controls live in the importable `checkmate` module, so add
+`import checkmate` to any file that calls them. The file still compiles under
+a plain `nimble test` (stock `std/unittest`): there `timeTravelActive()` is
+false and `advanceTime`/`travelTo` raise `CheckmateError`, so gate
+time-sensitive code with `if timeTravelActive():`. The automatic behaviour in
+the first example (`sleep`/`getTime`/`sleepAsync` reading the virtual clock)
+needs no import at all. Reported test durations stay real-clock, and the
+per-test timeout still catches genuine hangs.
 
 Caveats: an async timeout racing real pending I/O never expires virtually
 (the real-time watchdog backstops it); a busy-wait on the clock without

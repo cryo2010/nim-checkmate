@@ -23,7 +23,7 @@
 import std/[json, os, osproc, sets, strutils, tables]
 import ./config
 
-const OverlayVersion = 15
+const OverlayVersion = 16
 
 # --- generated module: the shared virtual clock core ----------------------
 # Importable as `import checkmate_timebase` by overlay modules and by user
@@ -35,8 +35,6 @@ const checkmateTimeTravel* = true
 
 when defined(js) or defined(nimscript):
   proc checkmateTimeTravelEnabled*(): bool = false
-  proc timeTravelActive*(): bool = false
-  proc advanceTime*(ms: int) = discard
   proc checkmateAdvanceNanos*(ns: int64) = discard
   proc checkmateAdvanceMonoToTicks*(target: int64) = discard
   proc checkmateTravelToWallNs*(target: int64) = discard
@@ -66,7 +64,6 @@ else:
     import std/sysatomics
 
   proc checkmateTimeTravelEnabled*(): bool {.inline.} = checkmateTtEnabled
-  proc timeTravelActive*(): bool {.inline.} = checkmateTtEnabled
 
   proc checkmateLoadMonoOffset(): int64 {.inline.} =
     atomicLoadN(addr checkmateMonoOffsetNs, ATOMIC_SEQ_CST)
@@ -81,10 +78,6 @@ else:
   proc checkmateAdvanceNanos*(ns: int64) =
     if ns > 0:
       discard atomicAddFetch(addr checkmateMonoOffsetNs, ns, ATOMIC_SEQ_CST)
-
-  proc advanceTime*(ms: int) =
-    ## Advances the virtual clock by ms milliseconds (all clocks).
-    checkmateAdvanceNanos(int64(ms) * 1_000_000)
 
   proc checkmateAdvanceMonoToTicks*(target: int64) =
     let cur = checkmateVirtualMonoTicks()
@@ -285,19 +278,12 @@ const unittestTail = """
 
 import std/os as checkmateOs
 from std/strutils as checkmateStrutils import parseInt
-import checkmate_timebase
-export checkmate_timebase
 
-proc advanceTime*(d: Duration) =
-  ## Advances the virtual clock (monotonic and wall) by `d`.
-  checkmateAdvanceNanos(d.inNanoseconds)
-
-proc travelTo*(t: Time) =
-  ## Jumps the virtual wall clock to `t`; the monotonic clock is unaffected.
-  checkmateTravelToWallNs(t.toUnix() * 1_000_000_000'i64 + t.nanosecond)
-
-proc travelTo*(dt: DateTime) =
-  travelTo(dt.toTime())
+# The time-travel control API (advanceTime/travelTo/timeTravelActive) is no
+# longer injected here: it lives in the importable `checkmate` module so a
+# test that uses it stays honest about its dependency and still compiles under
+# stock std/unittest. The transparent clock overlays (times/os/monotimes/
+# asyncdispatch) are unaffected.
 
 # --- power-assert: subexpression recording through and/or/not -------------
 # Activates only when the top-level expression uses boolean connectives
