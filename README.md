@@ -13,23 +13,19 @@ features like flake detection, line coverage and time travel.
 
 - **Zero setup**: discovers and runs your unmodified `std/unittest`
   files; nothing in your tests needs to change.
-- **Parallel**: compiles and runs test files concurrently, each in its
-  own process with a private nimcache.
+- **Parallel**: compiles and runs test files concurrently
 - **Flake detection**: `--loop N` reruns the suite to surface flaky
   tests, reporting per-iteration pass/fail ratios.
 - **Rich failure output**: power-assert decomposition of `and`/`or`/`not`
-  expressions, verbatim source frames, and string/seq diff windows.
-- **Line coverage**: gcov-based per-file coverage with a `min_lines`
-  gate (minimum percent or maximum uncovered lines).
-- **Time travel**: freeze the clock so `sleep` is instant and time only
-  advances via `advanceTime`/`travelTo`.
-- **Per-test timeouts**: a progress-based watchdog kills a hung test and
-  its whole process tree.
+  expressions, verbatim source frames, and `string`/`seq` diff windows.
+- **Per-test timeouts**: a progress-based watchdog kills hung tests
 - **Empty-test enforcement**: fails tests that execute no assertions
   (opt-out with `--allow-empty-tests`).
-- **Jest-style filtering**: a positional regex selects test files by path,
-  `-t` selects tests by name; both are real regexes.
+- **Test filtering**: select test files by regex,`-t` selects by name regex
 - **Configurable**: a single `checkmate.toml`; every flag has a config key.
+- **Line coverage**: gcov-based per-file coverage with enforcement
+- **Time travel**: freeze the clock so `sleep` is instant and time only
+  advances via `advanceTime`/`travelTo`.
 
 ## Contents
 
