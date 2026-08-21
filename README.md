@@ -118,8 +118,7 @@ checkmate --bail --timeout:30          # fail fast in CI
 
 `checkmate init` generates the full schema with defaults. CLI flags override
 config values. The file also anchors the project root: checkmate walks up
-from the current directory to find it. A plain `checkmate.toml` (no dot) is
-still accepted as a deprecated fallback.
+from the current directory to find it. 
 
 ```toml
 schema_version = 1        # config format version; checkmate migrates older
