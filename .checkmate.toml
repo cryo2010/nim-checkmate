@@ -1,6 +1,8 @@
 # checkmate's own test configuration (dogfooding).
 # All available options listed; values differing from defaults are marked.
 
+schema_version = 1          # config format version (for upgrade migrations)
+
 [tests]
 dirs = ["tests"]            # directories scanned recursively for test files
 pattern = "t_*.nim"         # OVERRIDE (default "t*.nim"): our tests all use t_ prefix

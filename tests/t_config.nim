@@ -26,7 +26,7 @@ suite "config defaults and toml":
     check cfg.dirs == @["tests"]
 
   test "toml overrides defaults":
-    writeFile(tmpRoot / "checkmate.toml", """
+    writeFile(tmpRoot / ConfigFileName, """
 [tests]
 dirs = ["spec", "tests"]
 exclude = ["spec/fixtures/*"]
@@ -51,26 +51,26 @@ color = "never"
     check cfg.allowEmptyTests
 
   test "coverage min_lines accepts float, int and negative":
-    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nenabled = true\nmin_lines = 80.5\n")
+    writeFile(tmpRoot / ConfigFileName, "[coverage]\nenabled = true\nmin_lines = 80.5\n")
     check loadConfig(tmpRoot).covMinLines == 80.5
-    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nmin_lines = -50\n")
+    writeFile(tmpRoot / ConfigFileName, "[coverage]\nmin_lines = -50\n")
     check loadConfig(tmpRoot).covMinLines == -50.0
     check defaultConfig().covMinLines == 0.0
-    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nmin_lines = 101\n")
+    writeFile(tmpRoot / ConfigFileName, "[coverage]\nmin_lines = 101\n")
     expect UsageError:
       discard loadConfig(tmpRoot)
-    writeFile(tmpRoot / "checkmate.toml", "[coverage]\nmin_lines = \"lots\"\n")
+    writeFile(tmpRoot / ConfigFileName, "[coverage]\nmin_lines = \"lots\"\n")
     expect UsageError:
       discard loadConfig(tmpRoot)
 
   test "time travel config parses and validates":
-    writeFile(tmpRoot / "checkmate.toml",
+    writeFile(tmpRoot / ConfigFileName,
       "[run]\ntime_travel = true\ntime_start = \"2020-06-15T12:00:00Z\"\n")
     let cfg = loadConfig(tmpRoot)
     check cfg.timeTravel
     check cfg.timeStart == "2020-06-15T12:00:00Z"
     check not defaultConfig().timeTravel
-    writeFile(tmpRoot / "checkmate.toml", "[run]\ntime_start = \"soonish\"\n")
+    writeFile(tmpRoot / ConfigFileName, "[run]\ntime_start = \"soonish\"\n")
     expect UsageError:
       discard loadConfig(tmpRoot)
 
@@ -101,30 +101,30 @@ color = "never"
     check defaults.fmtMaxSuite == 60
     check defaults.fmtMaxTest == 60
     check defaults.fmtMaxValue == 400
-    writeFile(tmpRoot / "checkmate.toml",
+    writeFile(tmpRoot / ConfigFileName,
       "[format]\nmax_path = 0\nmax_suite = 30\nmax_value = 1000\n")
     let cfg = loadConfig(tmpRoot)
     check cfg.fmtMaxPath == 0        # 0 = unlimited
     check cfg.fmtMaxSuite == 30
     check cfg.fmtMaxTest == 60       # untouched key keeps default
     check cfg.fmtMaxValue == 1000
-    writeFile(tmpRoot / "checkmate.toml", "[format]\nmax_test = -1\n")
+    writeFile(tmpRoot / ConfigFileName, "[format]\nmax_test = -1\n")
     expect UsageError:
       discard loadConfig(tmpRoot)
     check defaults.fmtContext == 3
-    writeFile(tmpRoot / "checkmate.toml", "[format]\ncontext = 0\n")
+    writeFile(tmpRoot / ConfigFileName, "[format]\ncontext = 0\n")
     check loadConfig(tmpRoot).fmtContext == 0
-    writeFile(tmpRoot / "checkmate.toml", "[format]\ncontext = -2\n")
+    writeFile(tmpRoot / ConfigFileName, "[format]\ncontext = -2\n")
     expect UsageError:
       discard loadConfig(tmpRoot)
 
   test "invalid toml raises UsageError":
-    writeFile(tmpRoot / "checkmate.toml", "[run]\nloop = \"three\"\n")
+    writeFile(tmpRoot / ConfigFileName, "[run]\nloop = \"three\"\n")
     expect UsageError:
       discard loadConfig(tmpRoot)
 
   test "generated init template parses back":
-    writeFile(tmpRoot / "checkmate.toml", initTomlTemplate)
+    writeFile(tmpRoot / ConfigFileName, initTomlTemplate)
     let cfg = loadConfig(tmpRoot)
     check cfg.dirs == @["tests"]
     check cfg.jobs == 0
@@ -164,11 +164,58 @@ color = "never"
     check autoColorAllowed(true, "", "xterm-256color", "false")
     check autoColorAllowed(true, "", "xterm-256color", "0")
 
+  test "schema_version parses and defaults to current":
+    check defaultConfig().schemaVersion == CurrentSchemaVersion
+    writeFile(tmpRoot / ConfigFileName, "schema_version = 1\n[tests]\ndirs = [\"t\"]\n")
+    check loadConfig(tmpRoot).schemaVersion == 1
+    # a config without the key is treated as the current version, no warning
+    writeFile(tmpRoot / ConfigFileName, "[tests]\ndirs = [\"t\"]\n")
+    check loadConfig(tmpRoot).schemaVersion == CurrentSchemaVersion
+
+  test "schema_version out of range or wrong type raises":
+    writeFile(tmpRoot / ConfigFileName, "schema_version = 0\n")
+    expect UsageError:
+      discard loadConfig(tmpRoot)
+    writeFile(tmpRoot / ConfigFileName, "schema_version = \"one\"\n")
+    expect UsageError:
+      discard loadConfig(tmpRoot)
+
+  test "a newer schema_version still loads (forward compatible)":
+    # newer-than-supported warns on stderr but does not fail the load
+    writeFile(tmpRoot / ConfigFileName,
+      "schema_version = 999\n[run]\nloop = 2\n")
+    let cfg = loadConfig(tmpRoot)
+    check cfg.schemaVersion == 999
+    check cfg.loop == 2
+
+suite "config filename":
+  setup:
+    removeDir(tmpRoot); createDir(tmpRoot)
+  teardown:
+    removeDir(tmpRoot)
+
+  test "legacy checkmate.toml is still discovered and loaded":
+    writeFile(tmpRoot / LegacyConfigFileName, "[run]\nloop = 4\n")
+    check findConfigFile(tmpRoot) == tmpRoot / LegacyConfigFileName
+    check loadConfig(tmpRoot).loop == 4
+
+  test "the dot-prefixed name wins when both exist":
+    writeFile(tmpRoot / LegacyConfigFileName, "[run]\nloop = 4\n")
+    writeFile(tmpRoot / ConfigFileName, "[run]\nloop = 7\n")
+    check findConfigFile(tmpRoot) == tmpRoot / ConfigFileName
+    check loadConfig(tmpRoot).loop == 7
+
 suite "findProjectRoot":
-  test "walks up to checkmate.toml":
+  test "walks up to the config file":
     removeDir(tmpRoot)
     createDir(tmpRoot / "a" / "b")
-    writeFile(tmpRoot / "checkmate.toml", "")
+    writeFile(tmpRoot / ConfigFileName, "")
+    check findProjectRoot(tmpRoot / "a" / "b") == absolutePath(tmpRoot)
+    removeDir(tmpRoot)
+  test "walks up to a legacy config file too":
+    removeDir(tmpRoot)
+    createDir(tmpRoot / "a" / "b")
+    writeFile(tmpRoot / LegacyConfigFileName, "")
     check findProjectRoot(tmpRoot / "a" / "b") == absolutePath(tmpRoot)
     removeDir(tmpRoot)
   test "falls back to start dir":

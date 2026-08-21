@@ -22,7 +22,7 @@ features like flake detection, line coverage and time travel.
 - **Empty-test enforcement**: fails tests that execute no assertions
   (opt-out with `--allow-empty-tests`).
 - **Test filtering**: select test files by regex,`-t` selects by name regex
-- **Configurable**: a single `checkmate.toml`; every flag has a config key.
+- **Configurable**: a single `.checkmate.toml`; every flag has a config key.
 - **Line coverage**: gcov-based per-file coverage with enforcement
 - **Time travel**: freeze the clock so `sleep` is instant and time only
   advances via `advanceTime`/`travelTo`.
@@ -33,7 +33,7 @@ features like flake detection, line coverage and time travel.
 - [Install](#install)
 - [Quick start](#quick-start)
 - [Usage](#usage)
-- [Configuration (checkmate.toml)](#configuration-checkmatetoml)
+- [Configuration (.checkmate.toml)](#configuration-checkmatetoml)
 - [Flake detection](#flake-detection)
 - [Empty-test enforcement](#empty-test-enforcement)
 - [Time travel](#time-travel)
@@ -64,7 +64,7 @@ nimble install checkmate
 
 ```sh
 cd my-project
-checkmate init            # (optional) generate checkmate.toml
+checkmate init            # (optional) generate .checkmate.toml
 checkmate                 # discover tests/t*.nim, compile, run, report
 ```
 
@@ -77,7 +77,7 @@ calling the [time-travel](#time-travel) controls, which live behind an
 
 ```sh
 checkmate [run] [paths...] [options]   # run is the default subcommand
-checkmate init [--force]               # write a default checkmate.toml
+checkmate init [--force]               # write a default .checkmate.toml
 checkmate list [paths...]              # print discovered test files
 ```
 
@@ -114,13 +114,17 @@ checkmate --loop:20 --jobs:4           # flake hunting
 checkmate --bail --timeout:30          # fail fast in CI
 ```
 
-## Configuration (checkmate.toml)
+## Configuration (.checkmate.toml)
 
 `checkmate init` generates the full schema with defaults. CLI flags override
 config values. The file also anchors the project root: checkmate walks up
-from the current directory to find it.
+from the current directory to find it. A plain `checkmate.toml` (no dot) is
+still accepted as a deprecated fallback.
 
 ```toml
+schema_version = 1        # config format version; checkmate migrates older
+                          # files after an upgrade (leave as written)
+
 [tests]
 dirs = ["tests"]          # directories scanned recursively
 pattern = "t*.nim"        # filename glob (covers t_*.nim and test_*.nim)
@@ -160,7 +164,9 @@ enabled = false
 min_lines = 0             # gate: min percent (80.0) or max uncovered lines (-50)
 ```
 
-Add `.checkmate/` (the build/state cache) to your `.gitignore`.
+Commit `.checkmate.toml`; add the `.checkmate/` build/state cache dir to your
+`.gitignore` (they are different paths, so ignoring the cache never hides the
+config).
 
 ## Flake detection
 
@@ -350,7 +356,7 @@ checkmate: coverage 72.7% is below the required minimum of 80.0% (src/mathlib.ni
 ## Fixture projects
 
 `tests/fixtures/` holds self-contained subprojects, each with a static
-`checkmate.toml`, exercised end to end by `t_integration.nim`. They are
+`.checkmate.toml`, exercised end to end by `t_integration.nim`. They are
 also convenient for manual testing:
 
 ```sh

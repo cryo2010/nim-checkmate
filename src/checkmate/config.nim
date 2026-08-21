@@ -1,4 +1,4 @@
-## Configuration: defaults <- checkmate.toml <- CLI flags.
+## Configuration: defaults <- .checkmate.toml <- CLI flags.
 
 import std/[os, strutils, terminal, times]
 import parsetoml
@@ -10,6 +10,8 @@ type
     cmAuto = "auto", cmAlways = "always", cmNever = "never"
 
   Config* = object
+    # top-level
+    schemaVersion*: int     # config schema version (for upgrade migrations)
     # [tests]
     dirs*: seq[string]
     pattern*: string
@@ -46,10 +48,16 @@ type
     projectRoot*: string
     cacheDir*: string
 
-const ConfigFileName* = "checkmate.toml"
+const
+  ConfigFileName* = ".checkmate.toml"       # preferred (dot-prefixed)
+  LegacyConfigFileName* = "checkmate.toml"   # still honored, with a rename note
+  CurrentSchemaVersion* = 1
+    ## Bump when the config schema changes incompatibly; older files are then
+    ## migrated on load (see the seam in loadConfig).
 
 proc defaultConfig*(): Config =
   Config(
+    schemaVersion: CurrentSchemaVersion,
     dirs: @["tests"], pattern: "t*.nim", exclude: @[],
     jobs: 0, loop: 1, bail: false, timeoutSec: 300,
     nimBin: "nim", backend: "c",
@@ -57,10 +65,17 @@ proc defaultConfig*(): Config =
     fmtContext: 3,
     color: cmAuto, verbose: false, covEnabled: false)
 
+proc findConfigFile*(dir: string): string =
+  ## Path to dir's config file: the dot-prefixed name is preferred, a plain
+  ## `checkmate.toml` is the legacy fallback; "" when neither exists.
+  if fileExists(dir / ConfigFileName): dir / ConfigFileName
+  elif fileExists(dir / LegacyConfigFileName): dir / LegacyConfigFileName
+  else: ""
+
 proc findProjectRoot*(startDir: string): string =
   var dir = absolutePath(startDir)
   while true:
-    if fileExists(dir / ConfigFileName):
+    if findConfigFile(dir).len > 0:
       return dir
     let parent = parentDir(dir)
     if parent == dir or parent.len == 0:
@@ -188,8 +203,11 @@ proc warnUnknownKeys(toml: TomlValueRef) =
     "format": @["max_path", "max_suite", "max_test", "max_value", "context"],
     "coverage": @["enabled", "min_lines"],
   }.toOrderedTable
+  const knownTopLevel = ["schema_version"]  # bare top-level keys, not sections
   if toml.kind != TomlValueKind.Table: return
   for section, node in toml.tableVal:
+    if section in knownTopLevel:
+      continue
     if not known.hasKey(section):
       stderr.writeLine "checkmate: warning: unknown section [" & section & "] in " & ConfigFileName
     elif node.kind == TomlValueKind.Table:
@@ -198,19 +216,35 @@ proc warnUnknownKeys(toml: TomlValueRef) =
           stderr.writeLine "checkmate: warning: unknown key '" & section & "." & key & "' in " & ConfigFileName
 
 proc loadConfig*(root: string): Config =
-  ## Defaults overlaid with checkmate.toml (if present in root).
+  ## Defaults overlaid with the project's config file (if present in root).
   result = defaultConfig()
   result.projectRoot = absolutePath(root)
   result.cacheDir = result.projectRoot / ".checkmate"
-  let path = result.projectRoot / ConfigFileName
-  if not fileExists(path):
+  let path = findConfigFile(result.projectRoot)
+  if path.len == 0:
     return
+  if extractFilename(path) == LegacyConfigFileName:
+    stderr.writeLine "checkmate: note: '" & LegacyConfigFileName &
+      "' is deprecated; rename it to '" & ConfigFileName & "'"
   var toml: TomlValueRef
   try:
     toml = parsetoml.parseFile(path)
   except TomlError as e:
     raise newException(UsageError, ConfigFileName & ": " & e.msg)
   warnUnknownKeys(toml)
+
+  # schema version: absent -> assume current (no migration needed); newer than
+  # we understand -> warn and read what we can; a real down-migration would
+  # slot in here when CurrentSchemaVersion is bumped past 1.
+  result.schemaVersion = toml.tget("schema_version").getInt(
+    "schema_version", CurrentSchemaVersion)
+  if result.schemaVersion < 1:
+    raise newException(UsageError,
+      ConfigFileName & ": schema_version must be >= 1")
+  if result.schemaVersion > CurrentSchemaVersion:
+    stderr.writeLine "checkmate: warning: config schema_version " &
+      $result.schemaVersion & " is newer than this checkmate supports (" &
+      $CurrentSchemaVersion & "); newer settings may be ignored -- upgrade checkmate"
 
   let tests = toml.tget("tests")
   if tests.tget("dirs") != nil: result.dirs = tests.tget("dirs").getStrSeq("tests.dirs")
@@ -303,8 +337,12 @@ proc mergeCli*(cfg: var Config; loop, jobs, timeout: int; bail, verbose, coverag
 
 # --- checkmate init -------------------------------------------------------
 
-const initTomlTemplate* = """# checkmate.toml - configuration for the checkmate test runner
-# CLI flags override these values.
+const initTomlTemplate* = """# .checkmate.toml - configuration for the checkmate test runner
+# CLI flags override these values. Commit this file; the .checkmate/ cache dir
+# is disposable and belongs in .gitignore.
+
+schema_version = 1        # config format version; checkmate migrates older
+                          # files after an upgrade (leave as written)
 
 [tests]
 dirs = ["tests"]          # directories scanned recursively for test files
@@ -353,7 +391,7 @@ min_lines = 0             # coverage gate: minimum percent (e.g. 80.0) or, if
 """
 
 proc writeInitToml*(dir: string, force: bool): string =
-  ## Writes checkmate.toml into dir; returns the path.
+  ## Writes .checkmate.toml into dir; returns the path.
   result = dir / ConfigFileName
   if fileExists(result) and not force:
     raise newException(UsageError, result & " already exists (use --force to overwrite)")
