@@ -44,6 +44,10 @@ proc buildCompileTask*(cfg: Config, tf: TestFile,
     "--path:" & quoteShell(cfg.cacheDir / "inject"),
     "--import:" & InjectModuleName,
   ]
+  # the project's own source dir, searched before installed packages so a
+  # globally-installed copy of this package cannot shadow the code under test
+  if cfg.srcPath.len > 0:
+    parts.add "--path:" & quoteShell(cfg.srcPath)
   for p in cfg.extraPaths:
     let abs = if isAbsolute(p): p else: cfg.projectRoot / p
     parts.add "--path:" & quoteShell(abs)

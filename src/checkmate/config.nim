@@ -47,6 +47,8 @@ type
     # resolved at load time
     projectRoot*: string
     cacheDir*: string
+    srcPath*: string    # project's own source dir (from the .nimble srcDir),
+                        # searched before installed packages; "" if none
 
 const
   ConfigFileName* = ".checkmate.toml"       # preferred (dot-prefixed)
@@ -72,15 +74,62 @@ proc findConfigFile*(dir: string): string =
   elif fileExists(dir / LegacyConfigFileName): dir / LegacyConfigFileName
   else: ""
 
+proc findNimbleFile*(dir: string): string =
+  ## The first `*.nimble` in dir, or "" if none.
+  for f in walkFiles(dir / "*.nimble"):
+    return f
+  ""
+
+proc parseNimbleSrcDir(nimblePath: string): string =
+  ## Best-effort read of `srcDir` from a .nimble file (the common declarative
+  ## `srcDir = "src"` form; the first double-quoted value wins). "" (meaning the
+  ## package root) when the key is absent or the line cannot be parsed.
+  var content: string
+  try: content = readFile(nimblePath)
+  except CatchableError: return ""
+  for raw in content.splitLines:
+    let line = raw.strip()
+    if not line.startsWith("srcDir"): continue
+    let rest = line["srcDir".len .. ^1].strip()
+    if not rest.startsWith("="): continue
+    let q1 = rest.find('"')
+    if q1 < 0: continue
+    let q2 = rest.find('"', q1 + 1)
+    if q2 < 0: continue
+    return rest[q1 + 1 ..< q2]
+  ""
+
+proc nimbleSourcePath*(projectRoot: string): string =
+  ## Absolute dir Nim should search FIRST for the project's own modules, so a
+  ## globally-installed copy of the same package never shadows the local code
+  ## under test. Derived from the .nimble `srcDir` (default: the project root).
+  ## "" when there is no .nimble file or the resolved dir does not exist.
+  let nimble = findNimbleFile(projectRoot)
+  if nimble.len == 0: return ""
+  let srcDir = parseNimbleSrcDir(nimble)
+  let p = if srcDir.len == 0: projectRoot else: projectRoot / srcDir
+  if dirExists(p): p else: ""
+
 proc findProjectRoot*(startDir: string): string =
-  var dir = absolutePath(startDir)
+  ## Nearest ancestor with a checkmate config anchors the project. Failing that
+  ## (a plain nimble project with no config), the nearest ancestor with a
+  ## `.nimble` file. Failing both, startDir.
+  let start = absolutePath(startDir)
+  var dir = start
   while true:
     if findConfigFile(dir).len > 0:
       return dir
     let parent = parentDir(dir)
-    if parent == dir or parent.len == 0:
-      return absolutePath(startDir)
+    if parent == dir or parent.len == 0: break
     dir = parent
+  dir = start
+  while true:
+    if findNimbleFile(dir).len > 0:
+      return dir
+    let parent = parentDir(dir)
+    if parent == dir or parent.len == 0: break
+    dir = parent
+  start
 
 proc parseColorMode*(s: string): ColorMode =
   case s.toLowerAscii
@@ -220,6 +269,9 @@ proc loadConfig*(root: string): Config =
   result = defaultConfig()
   result.projectRoot = absolutePath(root)
   result.cacheDir = result.projectRoot / ".checkmate"
+  # resolved whether or not a config file exists, so a plain nimble project
+  # (no .checkmate.toml) still compiles against its own source first
+  result.srcPath = nimbleSourcePath(result.projectRoot)
   let path = findConfigFile(result.projectRoot)
   if path.len == 0:
     return

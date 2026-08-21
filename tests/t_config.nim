@@ -205,6 +205,28 @@ suite "config filename":
     check findConfigFile(tmpRoot) == tmpRoot / ConfigFileName
     check loadConfig(tmpRoot).loop == 7
 
+suite "nimble srcDir":
+  setup:
+    removeDir(tmpRoot); createDir(tmpRoot)
+  teardown:
+    removeDir(tmpRoot)
+
+  test "srcPath comes from the .nimble srcDir, even without a config":
+    createDir(tmpRoot / "src")
+    writeFile(tmpRoot / "pkg.nimble", "version = \"0.1.0\"\nsrcDir = \"src\"\n")
+    check loadConfig(tmpRoot).srcPath == absolutePath(tmpRoot) / "src"
+
+  test "srcPath defaults to the project root when srcDir is unset":
+    writeFile(tmpRoot / "pkg.nimble", "version = \"0.1.0\"\n")
+    check loadConfig(tmpRoot).srcPath == absolutePath(tmpRoot)
+
+  test "srcPath is empty without a .nimble file":
+    check loadConfig(tmpRoot).srcPath == ""
+
+  test "a srcDir pointing at a missing directory yields no srcPath":
+    writeFile(tmpRoot / "pkg.nimble", "srcDir = \"nope\"\n")
+    check loadConfig(tmpRoot).srcPath == ""
+
 suite "findProjectRoot":
   test "walks up to the config file":
     removeDir(tmpRoot)
@@ -216,6 +238,13 @@ suite "findProjectRoot":
     removeDir(tmpRoot)
     createDir(tmpRoot / "a" / "b")
     writeFile(tmpRoot / LegacyConfigFileName, "")
+    check findProjectRoot(tmpRoot / "a" / "b") == absolutePath(tmpRoot)
+    removeDir(tmpRoot)
+  test "anchors on a .nimble when no config exists":
+    # a plain nimble project with no .checkmate.toml still resolves its root
+    removeDir(tmpRoot)
+    createDir(tmpRoot / "a" / "b")
+    writeFile(tmpRoot / "pkg.nimble", "version = \"0.1.0\"\n")
     check findProjectRoot(tmpRoot / "a" / "b") == absolutePath(tmpRoot)
     removeDir(tmpRoot)
   test "falls back to start dir":
