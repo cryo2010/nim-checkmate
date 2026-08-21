@@ -476,13 +476,13 @@ suite "time travel":
     check "tests:  6/7 passed (1 failed)" in output
 
 suite "init generation":
-  test "init writes checkmate.toml, refuses overwrite, honors --force":
+  test "init writes .checkmate.toml, refuses overwrite, honors --force":
     let dir = getTempDir() / "checkmate_t_init"
     removeDir(dir)
     createDir(dir)
     let (_, code) = execCmdEx(quoteShell(checkmateBin) & " init", workingDir = dir)
     check code == 0
-    check fileExists(dir / "checkmate.toml")
+    check fileExists(dir / ".checkmate.toml")
     let (_, again) = execCmdEx(quoteShell(checkmateBin) & " init", workingDir = dir)
     check again == 2  # refuses to overwrite
     let (_, forced) = execCmdEx(quoteShell(checkmateBin) & " init --force",

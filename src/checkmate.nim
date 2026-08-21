@@ -133,12 +133,13 @@ when isMainModule:
       result = 2
 
   proc cmInit(force = false; chdir = ""): int =
-    ## Generate a checkmate.toml with the default configuration.
+    ## Generate a .checkmate.toml with the default configuration.
     try:
       applyChdir(chdir)
       let path = writeInitToml(getCurrentDir(), force)
       echo "created ", path
-      echo "tip: add .checkmate/ to your .gitignore"
+      echo "tip: commit ", ConfigFileName,
+        " and add the .checkmate/ cache dir to your .gitignore"
       0
     except UsageError as e:
       stderr.writeLine "checkmate: " & e.msg
@@ -184,7 +185,7 @@ when isMainModule:
     })
   dispatchGen(cmInit, cmdName = "init", dispatchName = "dispatchInit",
     short = {"chdir": 'C'},
-    help = {"force": "overwrite an existing checkmate.toml",
+    help = {"force": "overwrite an existing .checkmate.toml",
             "chdir": "run as if started in this directory"})
   dispatchGen(cmList, cmdName = "list", dispatchName = "dispatchList",
     positional = "paths", short = {"chdir": 'C'},
