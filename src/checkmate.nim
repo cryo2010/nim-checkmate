@@ -66,7 +66,7 @@ when isMainModule:
     if pattern.len > 0:
       discard compilePattern(pattern, flagName)
 
-  const checkmateVersion = "0.1.0"
+  const checkmateVersion = "0.2.0"
 
   proc applyChdir(chdir: string) =
     ## git/make-style -C: run as if started in this directory.
