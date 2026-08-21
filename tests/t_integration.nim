@@ -148,6 +148,14 @@ suite "fixture runs":
     # has a result (its name may still appear in context frames)
     check "tests:  0/1 passed (1 failed)" in output
 
+  test "compiles against the project's own srcDir":
+    # t_uses.nim imports a module that lives under the fixture's src/; it only
+    # resolves because checkmate adds --path:<srcDir> from the .nimble, ahead of
+    # any installed package. Without that, this file would fail to compile.
+    let (output, code) = cm("nimble_src")
+    check code == 0
+    check "tests:  1/1 passed" in output
+
   test "hanging test times out":
     let (output, code) = cm("hanging")
     check code == 1

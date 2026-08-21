@@ -4,6 +4,17 @@ All notable changes to checkmate are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-1.0, minor
 releases may include breaking changes.
 
+## [Unreleased]
+
+### Fixed
+
+- Test binaries are compiled with the project's own source directory (the
+  `srcDir` from the `<project>.nimble`, or the project root if unset) on the
+  path, searched ahead of installed packages. A globally-installed copy of the
+  package can no longer shadow the local code under test. When there is no
+  `.checkmate.toml`, checkmate now anchors the project root at the nearest
+  `.nimble` file.
+
 ## [0.2.0] - 2026-08-21
 
 ### Breaking

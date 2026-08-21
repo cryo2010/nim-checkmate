@@ -1,0 +1,5 @@
+version     = "0.1.0"
+author      = "checkmate tests"
+description = "fixture: local srcDir must win over any installed package"
+license     = "MIT"
+srcDir      = "lib"

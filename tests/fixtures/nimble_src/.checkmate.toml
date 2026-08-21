@@ -1,0 +1,5 @@
+schema_version = 1
+# Anchors this fixture as its own project. It also carries a nimble_src.nimble
+# with srcDir = "lib" (deliberately not "src"); the test imports a module from
+# lib/ that resolves ONLY because checkmate reads srcDir from the .nimble and
+# adds --path:<srcDir> (so local code beats installed packages).

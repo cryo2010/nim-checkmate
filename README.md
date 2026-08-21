@@ -167,6 +167,14 @@ Commit `.checkmate.toml`; add the `.checkmate/` build/state cache dir to your
 `.gitignore` (they are different paths, so ignoring the cache never hides the
 config).
 
+checkmate compiles each test with your project's own source directory on the
+path, taken from the `srcDir` in your `<project>.nimble` (or the project root
+if `srcDir` is unset), and searched *ahead of* installed packages. This keeps a
+globally-installed copy of your package from shadowing the local code under
+test. It also means checkmate works in a plain nimble project with **no
+`.checkmate.toml`**: when there is no config, it anchors the project root at the
+nearest `.nimble` file.
+
 ## Flake detection
 
 `--loop=N` compiles once and runs every file N times, interleaved so early
