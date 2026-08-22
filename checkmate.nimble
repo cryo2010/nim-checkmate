@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.2.0"
+version       = "0.3.0"
 author        = "Craig Younker"
 description   = "A jest-like test runner for Nim"
 license       = "MIT"

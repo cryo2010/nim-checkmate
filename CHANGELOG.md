@@ -4,7 +4,7 @@ All notable changes to checkmate are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Pre-1.0, minor
 releases may include breaking changes.
 
-## [Unreleased]
+## [0.3.0] - 2026-08-21
 
 ### Fixed
 
